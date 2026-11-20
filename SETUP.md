@@ -151,8 +151,12 @@ never contacts the store.
 ## Verified
 
 The console was verified live against a store deployed with Terraform
-on 2026-11-20: connection check and round trip by label. A
+on 2026-11-20: connection check and round trip by label.
+
+Not yet run from this repository: building the Space from its URL
+(step 1) and the browser check (step 3). Both follow from how Muse
+builds Spaces and from the code, and both are part of the live
 re-verification against a store deployed with the store's upcoming
-CloudFormation flow is tracked in
-[#5](https://github.com/cmeans/s3-blob-store-muse/issues/5), and its
+CloudFormation flow, tracked in
+[#5](https://github.com/cmeans/s3-blob-store-muse/issues/5). Its
 result goes here.
