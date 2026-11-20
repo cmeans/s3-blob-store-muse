@@ -14,6 +14,13 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
+// TypeScript 7 ships without the JS API this script uses.
+if (typeof ts.createProgram !== "function") {
+  console.error(
+    `typescript ${ts.version}: no JS API (TypeScript 7+); this check needs TypeScript 5.x or 6.x`,
+  );
+  process.exit(2);
+}
 
 const files = process.argv.slice(2);
 if (files.length === 0) {
