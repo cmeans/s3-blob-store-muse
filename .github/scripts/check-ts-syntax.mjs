@@ -1,4 +1,4 @@
-// Parse every TypeScript source file and report syntax errors.
+// Parse every TypeScript and JavaScript source file and report syntax errors.
 //
 // CI can't install this repo's dependencies: the Muse Space SDK
 // (@hatch/space-sdk) is a local file dependency that exists only inside a

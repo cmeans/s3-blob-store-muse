@@ -14,7 +14,11 @@ as broken.
 
 Not checked: links with a URL scheme (https:, mailto:, ...) or starting
 with `//` or `#`, so the check needs no network; links inside fenced code
-blocks and inline code; reference-style link definitions.
+blocks and inline code (any backtick run); reference-style link
+definitions; HTML links (`<a href>`, `<img src>`).
+
+Read as text, so a link-shaped string there is checked too: indented code
+blocks, fences inside blockquotes, HTML comments, and escaped brackets.
 """
 
 import re
@@ -23,7 +27,8 @@ from pathlib import Path
 from urllib.parse import unquote
 
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-INLINE_CODE = re.compile(r"`[^`]*`")
+# A code span: a backtick run, then the same-length run that closes it.
+INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 TITLE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\))")
 
@@ -63,8 +68,12 @@ def targets(line: str) -> list[str]:
 
 def check(path: Path, root: Path) -> list[str]:
     errors = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return [f"{path}: can't read: {e}"]
     fence = None  # the opening fence's character and length, while inside one
-    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for n, line in enumerate(text.splitlines(), 1):
         m = FENCE.match(line)
         if fence is None:
             if m:
