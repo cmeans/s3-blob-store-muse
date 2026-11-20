@@ -1,5 +1,7 @@
 # s3-blob-store-muse
 
+[![CI](https://github.com/cmeans/s3-blob-store-muse/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cmeans/s3-blob-store-muse/actions/workflows/ci.yml?query=branch%3Amain) [![License](https://img.shields.io/github/license/cmeans/s3-blob-store-muse)](LICENSE)
+
 A one-page operator console for
 [s3-blob-store](https://github.com/cmeans/s3-blob-store), built as a
 Muse Space (a full-stack web app inside Muse, Meta's personal AI
