@@ -70,7 +70,7 @@ Select **Test connection**. The console calls the store's health check
 |---|---|
 | Connected — the store answered ok and accepted the token. | Working. |
 | Unauthorized (HTTP 401) — the store rejected the token. | Wrong token: not the one this store was deployed with, or its SHA-256 digest instead of the token. Select **Edit** and paste it again. |
-| Unauthorized (HTTP 403) — the store rejected the token. | Despite the message, not the token: a 403 comes from AWS before the store's code runs. The deploy is missing its Function URL permission, or the URL isn't this store's. Check the deploy, not the token. |
+| Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL. | Not the token: a 403 comes from AWS before the store's code runs. Check the deploy and the URL. |
 | Unreachable — the Function URL did not answer. Check the URL and try again. | Wrong URL, or the store isn't deployed. Check the URL against your deployment's output. |
 | No store configured — save the Function URL and token first. | Nothing is saved yet. Fill in both fields first. |
 | Unexpected answer from the store (HTTP *n*). | The address answered with another status: a store error, or a URL that points at something else. |
@@ -94,7 +94,7 @@ Use test text, not a secret.
 3. Clear the text box and select **Fetch**. Your text comes back, and
    the message says `Fetched 15 characters.`
 4. Select **Delete**, then **Confirm delete — irreversible**. Expect
-   `Deleted "setup-check".`
+   `The store answered deleted for "setup-check" (it says so even if nothing was stored there).`
 5. Select **Fetch** again. Expect
    `Not found — no blob under "setup-check".` This proves the delete:
    the store also answers "deleted" for a label that was already gone.
