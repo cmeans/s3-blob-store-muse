@@ -24,9 +24,12 @@ const labelSchema = z
   .trim()
   .min(1, "Enter a label.")
   .max(128, "Labels are at most 128 characters.")
+  // The store's own rule (its handler's LABEL_RE): a letter or digit first.
+  // This also refuses "." and "..", which URL parsing would collapse to
+  // another path.
   .regex(
-    /^[A-Za-z0-9._-]+$/,
-    "Labels use letters, digits, dot, dash and underscore only.",
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
+    "Labels start with a letter or digit, then use letters, digits, dot, dash and underscore.",
   );
 
 type StoredConfig = { functionUrl: string; token: string };
@@ -79,6 +82,13 @@ async function callStore(
   }
 }
 
+// The store's handler answers a bad token with 401 and never sends 403. A 403
+// comes from AWS before the handler runs: the Function URL's permission is
+// missing, or the URL isn't this store's.
+const UNAUTHORIZED_MESSAGE = "Unauthorized (HTTP 401) — the store rejected the token.";
+const FORBIDDEN_MESSAGE =
+  "Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.";
+
 type HistoryAction = "stored" | "fetched" | "deleted";
 
 /** Append one row to the console's own operation record. */
@@ -112,7 +122,7 @@ const configStateResponse = z.object({
 });
 
 const testConnectionResponse = z.object({
-  status: z.enum(["ok", "unauthorized", "unreachable", "not_configured", "error"]),
+  status: z.enum(["ok", "unauthorized", "forbidden", "unreachable", "not_configured", "error"]),
   httpStatus: z.number().nullable(),
   message: z.string(),
 });
@@ -187,7 +197,7 @@ export const Actions = {
 
   testConnection: defineAction({
     description:
-      "Calls GET / on the configured store with the saved token and reports ok, unauthorized, or unreachable as distinct outcomes.",
+      "Calls GET / on the configured store with the saved token. Reports ok, unauthorized (401: the store rejected the token), forbidden (403: AWS refused the call before it reached the store), unreachable, not_configured, or error (any other status) as distinct outcomes.",
     request: z.object({}),
     response: testConnectionResponse,
     async handler(ctx): Promise<z.infer<typeof testConnectionResponse>> {
@@ -214,12 +224,11 @@ export const Actions = {
           message: "Connected — the store answered ok and accepted the token.",
         };
       }
-      if (result.status === 401 || result.status === 403) {
-        return {
-          status: "unauthorized",
-          httpStatus: result.status,
-          message: `Unauthorized (HTTP ${result.status}) — the store rejected the token.`,
-        };
+      if (result.status === 401) {
+        return { status: "unauthorized", httpStatus: 401, message: UNAUTHORIZED_MESSAGE };
+      }
+      if (result.status === 403) {
+        return { status: "forbidden", httpStatus: 403, message: FORBIDDEN_MESSAGE };
       }
       return {
         status: "error",
@@ -231,7 +240,7 @@ export const Actions = {
 
   fetchBlob: defineAction({
     description:
-      "Fetches the blob stored under an exact label. A missing label returns found:false rather than an error.",
+      "Fetches the blob stored under an exact label. found:true means content holds the blob. found:false means no content: a missing label (status 404), or an error (status 401, 403, another status, or null when the store is unreachable); status and message say which.",
     request: z.object({ label: labelSchema }),
     response: fetchBlobResponse,
     async handler(ctx, args): Promise<z.infer<typeof fetchBlobResponse>> {
@@ -262,7 +271,7 @@ export const Actions = {
           found: false,
           content: null,
           status: result.status,
-          message: `Unauthorized (HTTP ${result.status}) — the store rejected the token.`,
+          message: result.status === 401 ? UNAUTHORIZED_MESSAGE : FORBIDDEN_MESSAGE,
         };
       }
       if (result.status !== 200) {
@@ -308,7 +317,7 @@ export const Actions = {
         return {
           ok: false,
           status: result.status,
-          message: `Unauthorized (HTTP ${result.status}) — the store rejected the token.`,
+          message: result.status === 401 ? UNAUTHORIZED_MESSAGE : FORBIDDEN_MESSAGE,
         };
       }
       if (result.status !== 200) {
@@ -330,7 +339,7 @@ export const Actions = {
 
   deleteBlob: defineAction({
     description:
-      "Deletes the blob under a label and reports the store's answer. Irreversible — the store has versioning off.",
+      "Deletes the blob under a label and reports the store's answer. Irreversible — the store has versioning off. ok:true means the store answered deleted, which it does even when nothing was stored under the label; a fetch that returns status 404 proves the label is empty.",
     request: z.object({ label: labelSchema }),
     response: deleteBlobResponse,
     async handler(ctx, args): Promise<z.infer<typeof deleteBlobResponse>> {
@@ -347,7 +356,7 @@ export const Actions = {
         return {
           ok: false,
           status: result.status,
-          message: `Unauthorized (HTTP ${result.status}) — the store rejected the token.`,
+          message: result.status === 401 ? UNAUTHORIZED_MESSAGE : FORBIDDEN_MESSAGE,
         };
       }
       if (result.status !== 200) {
@@ -359,10 +368,12 @@ export const Actions = {
       }
       await recordHistory(ctx, args.label, "deleted", null);
       ctx.invalidateQueries();
+      // The store answers "deleted" whether or not anything was stored, so
+      // say what's known: the store's answer, not that a blob existed.
       return {
         ok: true,
         status: 200,
-        message: `Deleted "${args.label}".`,
+        message: `The store answered deleted for "${args.label}" (it says so even if nothing was stored there).`,
       };
     },
   }),
