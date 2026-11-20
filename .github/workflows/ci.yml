@@ -45,8 +45,9 @@ jobs:
           fi
       - name: Manifests parse
         run: |
-          jq -e '.runtime and .entry and .slug' space.json > /dev/null
-          jq -e '.devDependencies.typescript' package.json > /dev/null
+          # Each key is a non-empty string (jq treats "" as true).
+          jq -e '[.runtime, .entry, .slug] | all(type == "string" and length > 0)' space.json > /dev/null
+          jq -e '.devDependencies.typescript | type == "string" and length > 0' package.json > /dev/null
       - name: TypeScript sources parse
         # The TypeScript version package.json pins, installed on its own.
         run: |
@@ -54,6 +55,6 @@ jobs:
           TS_VERSION=$(jq -r '.devDependencies.typescript' package.json)
           npm install --prefix "$RUNNER_TEMP/ts" --no-save --ignore-scripts --no-audit --no-fund "typescript@$TS_VERSION"
           git ls-files -z -- '*.ts' '*.tsx' '*.mjs' ':!:.github/**' \
-            | NODE_PATH="$RUNNER_TEMP/ts/node_modules" xargs -0 node .github/scripts/check-ts-syntax.mjs
+            | NODE_PATH="$RUNNER_TEMP/ts/node_modules" xargs -0 -r node .github/scripts/check-ts-syntax.mjs
       - name: Relative Markdown links resolve
-        run: git ls-files -z -- '*.md' | xargs -0 python3 .github/scripts/check-md-links.py
+        run: git ls-files -z -- '*.md' | xargs -0 -r python3 .github/scripts/check-md-links.py
