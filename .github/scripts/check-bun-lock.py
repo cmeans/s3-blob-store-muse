@@ -27,8 +27,11 @@ Checked:
   outward;
 - every package is depended on by the workspace or another package.
 
-Not modeled, so refused with an error saying so, and nothing else is
-reported (extend this script if the repo starts using one): more than one
+Not modeled, so refused with an error saying so (extend this script if the
+repo starts using one). The checks that depend on the modeled shape are
+skipped; only the basic errors found before the refusal (an unknown
+lockfileVersion, no root workspace, a non-string version in package.json)
+are reported with it. Refused: more than one
 workspace; aliases and URL or git specs ("npm:", "github:", "git+",
 "https:", "workspace:", "link:", and file: folders or relative paths);
 package.json's overrides, resolutions, workspaces, catalog(s) and
@@ -46,7 +49,8 @@ import json
 import re
 import sys
 
-EXACT = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$")
+# Used with fullmatch: "$" alone would also match before a trailing newline.
+EXACT = re.compile(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?")
 KNOWN_LOCKFILE_VERSIONS = (1, 2)
 DEP_FIELDS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
 # The lock's top-level keys this check understands; any other is refused.
@@ -165,8 +169,9 @@ def main(argv: list[str]) -> int:
         errors.append((path, msg))
 
     def refuse(what: str, path: str = lock_path) -> None:
-        """A shape this check doesn't model: reported alone, since the other
-        checks would only misread it."""
+        """A shape this check doesn't model. The checks that depend on the
+        modeled shape are skipped, since they would only misread it; basic
+        errors found before it are reported with it."""
         refusals.append((path, f"{what}, which this check doesn't model; extend check-bun-lock.py"))
 
     for path, lockfile in ((lock_path, True), (pkg_path, False)):
@@ -251,9 +256,9 @@ def main(argv: list[str]) -> int:
                 # bun writes "file:/abs/x.tgz" as "name@/abs/x.tgz".
                 path = want[len("file:"):]
                 if got not in (path, want):
-                    err(f"package.json has {dep} {want}, the lock resolves {got!r}")
-            elif EXACT.match(want) and got != want:
-                err(f"package.json pins {dep} {want}, the lock resolves {got}")
+                    err(f"package.json has {dep!r} at {want!r}, the lock resolves {got!r}")
+            elif EXACT.fullmatch(want) and got != want:
+                err(f"package.json pins {dep!r} at {want!r}, the lock resolves {got!r}")
 
     referenced = set()
     for field in DEP_FIELDS:
@@ -279,7 +284,7 @@ def main(argv: list[str]) -> int:
         elif ":" in ver:
             err(f"package {key!r} resolves to {ver!r}: URL, git, workspace and link "
                 "specs aren't modeled; extend check-bun-lock.py")
-        elif not EXACT.match(ver):
+        elif not EXACT.fullmatch(ver):
             err(f"package {key!r} resolves to {ver!r}, which isn't an exact version")
         elif len(entry) != 4 or entry[1] != "" or not isinstance(entry[2], dict):
             err(f"package {key!r}: a registry entry isn't [spec, \"\", {{...}}, integrity] "
