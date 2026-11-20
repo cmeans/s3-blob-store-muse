@@ -4,7 +4,8 @@
 // (@hatch/space-sdk) is a local file dependency that exists only inside a
 // Muse Space, so a full typecheck (`bun run typecheck`) runs there, not here.
 // This is the check CI can make without it: each file must parse, with the
-// TypeScript version package.json pins.
+// TypeScript version package.json pins. Only parser errors are reported:
+// grammar errors TypeScript finds in its checker need the full typecheck.
 //
 // Usage: node check-ts-syntax.mjs <file>...
 // Needs the typescript package resolvable (NODE_PATH or a local install).

@@ -3,10 +3,14 @@
 
 Usage: check-md-links.py <file.md>...   (run from the repo root)
 
-Checked: inline links and images, `[text](target)`. A target is looked up
-relative to the file's folder, or to the repo root when it starts with `/`
-(as GitHub resolves it), after its #fragment and ?query are dropped. A target
-outside the repo counts as broken.
+Checked: every inline link and image, `[text](target)`, wherever `](`
+starts one: nested link text and badges (`[![alt](img.png)](page.md)`) are
+read target by target. A target can be bare (one level of balanced
+parentheses allowed) or in <angle brackets>, and can have a "title", 'title'
+or (title). It is percent-decoded, its #fragment and ?query are dropped,
+and it is looked up relative to the file's folder, or to the repo root when
+it starts with `/` (as GitHub resolves it). A target outside the repo counts
+as broken.
 
 Not checked: links with a URL scheme (https:, mailto:, ...) or starting
 with `//` or `#`, so the check needs no network; links inside fenced code
@@ -16,11 +20,45 @@ blocks and inline code; reference-style link definitions.
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
-LINK = re.compile(r"!?\[[^\]]*\]\(\s*(?:<([^>]*)>|([^)\s]+))(?:\s+\"[^\"]*\")?\s*\)")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 INLINE_CODE = re.compile(r"`[^`]*`")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+TITLE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\))")
+
+
+def targets(line: str) -> list[str]:
+    """The target of each `](...)` on the line."""
+    found = []
+    for m in re.finditer(r"\]\(", line):
+        i = m.end()
+        while i < len(line) and line[i] in " \t":
+            i += 1
+        if line.startswith("<", i):
+            end = line.find(">", i)
+            if end == -1:
+                continue
+            target, i = line[i + 1:end], end + 1
+        else:
+            start, depth = i, 0
+            while i < len(line) and not line[i].isspace():
+                if line[i] == "(":
+                    depth += 1
+                elif line[i] == ")":
+                    if depth == 0:
+                        break
+                    depth -= 1
+                i += 1
+            target = line[start:i]
+        t = TITLE.match(line, i)
+        if t:
+            i = t.end()
+        while i < len(line) and line[i] in " \t":
+            i += 1
+        if line.startswith(")", i) and target:
+            found.append(target)
+    return found
 
 
 def check(path: Path, root: Path) -> list[str]:
@@ -39,11 +77,10 @@ def check(path: Path, root: Path) -> list[str]:
                     and not line[m.end():].strip():
                 fence = None
             continue
-        for angle, bare in LINK.findall(INLINE_CODE.sub("", line)):
-            target = angle or bare
-            if not target or SCHEME.match(target) or target.startswith(("//", "#")):
+        for target in targets(INLINE_CODE.sub("", line)):
+            if SCHEME.match(target) or target.startswith(("//", "#")):
                 continue
-            rel = re.split(r"[#?]", target, maxsplit=1)[0]
+            rel = unquote(re.split(r"[#?]", target, maxsplit=1)[0])
             if not rel:
                 continue
             base = root if rel.startswith("/") else path.parent
