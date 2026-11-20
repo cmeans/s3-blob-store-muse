@@ -7,11 +7,19 @@ import { api } from "./api";
 
 const FIELDS = actionFields<typeof Actions>();
 
-type TestStatus = "ok" | "unauthorized" | "unreachable" | "not_configured" | "error";
+type TestStatus =
+  | "ok"
+  | "unauthorized"
+  | "forbidden"
+  | "unreachable"
+  | "not_configured"
+  | "error";
 
 function testTone(status: TestStatus): string {
   if (status === "ok") return "text-[var(--accent)]";
-  if (status === "unauthorized" || status === "error") return "text-[var(--danger)]";
+  if (status === "unauthorized" || status === "forbidden" || status === "error") {
+    return "text-[var(--danger)]";
+  }
   return "text-[var(--dim)]";
 }
 

@@ -30,16 +30,19 @@ that reads "Ciphertext only — never the plaintext secret."
   and saved by the Space's server. After saving, the page shows the
   URL and "Token: saved", never the token. **Test connection** calls
   the store's health check and reports one of: connected, unauthorized
-  (the store rejected the token), unreachable, or an unexpected HTTP
-  status. **Edit** replaces them; saving needs both again.
+  (the store rejected the token), forbidden (AWS refused the call
+  before it reached the store), unreachable, no store configured, or
+  an unexpected HTTP status. **Edit** replaces them; saving needs both
+  again.
 - **Blob.** A label field, a text box for the ciphertext, and
   **Fetch**, **Store** and **Delete**. Fetch fills the text box with
   what is stored under the label. Store creates or replaces the blob.
   Delete asks for a second click, because the store keeps no old
-  versions, and reports success even when nothing was stored under the
-  label. A blob can be up to 5,000,000 characters of ASCII text, such
-  as base64 ciphertext (the store's Function URL takes at most 6 MB
-  per request).
+  versions. Its message reports the store's answer, "deleted", which
+  the store gives even when nothing was stored under the label. A
+  blob can be up to 5,000,000 characters of ASCII text, such as base64
+  ciphertext (the store's Function URL takes at most 6 MB per
+  request).
 - **History.** Every fetch, store and delete the console has done
   successfully, newest first, with the labels it knows about and the
   last action on each. Clicking a label puts it in the label field.
@@ -68,10 +71,8 @@ token as an `Authorization: Bearer` header and calls the store.
 - `space.json`: the Space's manifest, written by Muse's builder.
 
 A label is up to 128 letters, digits, dots, dashes and underscores,
-and starts with a letter or digit: that's the store's rule. Stick to
-it: the console doesn't check the first character yet (#9). A label
-like `.x` fails with HTTP 400, and `.` and `..` don't address a blob
-at all (fetching `..` returns the store's health check, `ok`).
+and starts with a letter or digit: the store's rule, which the console
+checks before calling the store, after trimming spaces at either end.
 
 ## The history is the console's, not the bucket's
 
