@@ -1,76 +1,114 @@
 # s3-blob-store-muse
 
-The operator console for
+A one-page operator console for
 [s3-blob-store](https://github.com/cmeans/s3-blob-store), built as a
-Muse Space (a hosted full-stack web app in the Muse personal-agent
-environment). It gives a human a one-screen console over the blob
-store: configure the store's endpoint once, then fetch, store, and
-delete ciphertext blobs by label, with a history of what the console
-has done.
+Muse Space (a full-stack web app inside Muse, Meta's personal AI
+agent). Point it at your store once, then check the connection and
+store, fetch and delete ciphertext blobs by label, with a history of
+what the console has done.
 
-The store itself lives in the parent repo. This repo is only the
-console.
+**You need this repo if** you run an s3-blob-store, use Muse, and want
+a screen for the store your agent already uses: to check that the
+store answers, look at what is stored under a label, put a blob there
+by hand, or remove one.
 
-## Why source, not a link
+**You don't need it** to use the store. Muse reaches the store
+through its own connection, without this console. And if you don't
+have a deployed store, start with
+[s3-blob-store](https://github.com/cmeans/s3-blob-store): this console
+does nothing without one.
 
-A server-backed Space cannot be published at a public link — only
-static pages can. So the shareable form of this console is its
-source tree, published here. To run your own:
+To install it, see [SETUP.md](SETUP.md).
 
-- In Muse, create a new full-stack Space and give Muse this source
-  tree as the starting point (the layout below is the standard Muse
-  Space layout), or
-- Read `server/src/actions.ts` as a reference implementation and put
-  any front end you like over the same store API.
+## What it does
 
-Nothing is configured in the source. The operator enters the store's
-Function URL and bearer token in the console's setup screen at
-runtime; both are stored server-side by the Space, and the token is
-never sent back to the browser.
+The console is one page with three sections, under a fixed line that
+reads "Ciphertext only — never the plaintext secret."
 
-## Layout
+- **Setup.** The store's Function URL and bearer token, entered once
+  and saved by the Space's server. After saving, the page shows the
+  URL and "Token: saved", never the token. **Test connection** calls
+  the store's health check and reports one of: connected, unauthorized
+  (the store rejected the token), unreachable, or an unexpected HTTP
+  status. **Edit** replaces the URL or the token.
+- **Blob.** A label field, a text box for the ciphertext, and
+  **Fetch**, **Store** and **Delete**. Fetch fills the text box with
+  what is stored under the label. Store creates or replaces the blob.
+  Delete asks for a second click, because the store keeps no old
+  versions.
+- **History.** Every fetch, store and delete the console has made,
+  newest first, with the labels it knows about and the last action on
+  each. Clicking a label puts it in the label field. The store itself
+  can't list its bucket, so this record is the only list of labels
+  there is (see below).
 
-- `client/` — the React front end (`src/App.tsx` is the whole
-  console: setup, blob operations, history).
-- `server/src/actions.ts` — the backend wiring. Every store call is
-  made server-side with the saved token in an `Authorization: Bearer`
-  header:
-  - `saveConfig` / `getConfigState` — persist and report the
-    Function URL and token (state reports the URL and "token saved"
-    only).
-  - `testConnection` — `GET /` on the store; reports ok,
-    unauthorized, and unreachable distinctly.
-  - `fetchBlob` / `storeBlob` / `deleteBlob` — `GET` / `PUT` /
+## How it works
+
+Every store call is made by the Space's server, never the browser.
+The browser calls the Space's own actions; the server adds the saved
+token as an `Authorization: Bearer` header and calls the store.
+
+- `client/`: the React front end. `src/App.tsx` is the whole page.
+- `server/src/actions.ts`: the server actions.
+  - `saveConfig` and `getConfigState` save and report the Function URL
+    and token. `getConfigState` reports the URL and whether a token is
+    saved, never the token.
+  - `testConnection` calls `GET /` on the store.
+  - `fetchBlob`, `storeBlob` and `deleteBlob` call `GET`, `PUT` and
     `DELETE` on `/blobs/<label>`.
-  - `listHistory` / `registerExternalOperation` — the console's own
-    operation record (see below).
-- `server/src/schema.ts` and `drizzle/` — the Space's own database
-  schema and migrations (config + history tables). The database file
-  itself is never committed.
-- `space.json` — the Space's runtime manifest.
+  - `listHistory` and `registerExternalOperation` read and add to the
+    console's own record (see below).
+- `server/src/schema.ts` and `drizzle/`: the Space's database schema
+  and migrations, a one-row `config` table and a `history` table. The
+  database file itself is never committed.
+- `space.json`: the Space's manifest, written by Muse's builder.
+
+A label is up to 128 letters, digits, dots, dashes and underscores,
+and starts with a letter or digit: that's the store's rule. (The
+console doesn't check the first character yet, so a label like `.x`
+reaches the store and fails with HTTP 400.)
 
 ## The history is the console's, not the bucket's
 
-The store cannot list its bucket — its Lambda role has no list
-permission, by design. The console therefore keeps its own record of
-every fetch, store, and delete it performs (label, action, size,
-timestamp) and shows the labels it knows about.
-`registerExternalOperation` exists so an agent that stores or fetches
-a blob through its own connection can log the operation into the
-same history, keeping the console's view complete.
+The store can't list its bucket: its Lambda role has no list
+permission, by design. So the console keeps its own record of every
+fetch, store and delete it makes (label, action, size and time), and
+shows the labels it knows from that record.
 
-## Security posture, honestly
+When your agent stores or fetches a blob through its own connection,
+the console doesn't see it. `registerExternalOperation` lets the agent
+add that operation to the same record, so the console's view stays
+complete. It writes only to the console's own database and never
+contacts the store.
 
-This console holds the store's bearer token in its own server-side
-storage so a human can operate the store without pasting the token
-on every visit. That is a weaker posture than the agent fetch path
-in the parent pattern, where the token lives in the platform
-credential store and is swapped in per request. Treat this as an
-operator console for a store whose contents are ciphertext — which
-is all the store ever holds. The console's standing rule is printed
-at the top of its screen: ciphertext only, never the plaintext
-secret.
+## Security, honestly
 
-## Licence
+The console keeps the store's bearer token in its own server-side
+database, so you can use it without pasting the token on every visit.
+That is weaker than the agent's own path to the store, where the token
+sits in Muse's credential store and is added to each request on its
+way out. The console is meant for a store that holds only ciphertext,
+which is all an s3-blob-store should ever hold. Never put a plaintext
+secret in it: anything you store goes to S3 as typed.
 
-MIT. See `LICENSE`.
+[SETUP.md](SETUP.md) explains how the token is stored and how to check
+that your browser never receives it.
+
+## Acknowledgements
+
+Designed and maintained by a human.
+
+Built with AI collaborators:
+
+- **Muse**, Meta's personal AI agent, built the console as a Muse
+  Space and verified it live against a deployed store.
+- **Claude** (Anthropic), as Claude Code, built the repo's CI and
+  change workflow and drafted these docs from Muse's notes.
+
+The console is a client for the
+[s3-blob-store](https://github.com/cmeans/s3-blob-store) API, built
+on Muse's Spaces platform.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
