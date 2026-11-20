@@ -41,6 +41,10 @@ Don't edit two things in the tree, even if you fork it:
   inside Muse's build environment, where the Space SDK ships. It isn't
   meant to resolve anywhere else.
 
+And change `drizzle/meta/_journal.json` only by adding entries, as the
+README's "How it works" describes: drizzle's migrator applies only the
+migrations it lists.
+
 ## 2. Configure it
 
 Open the console. With nothing saved yet, the **Setup** section shows
