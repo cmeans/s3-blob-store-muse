@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Read-only token for every job: nothing here writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # NOTE: pr-labels.yml and pr-labels-ci.yml find this workflow by its name
+  # ("CI") and file (ci.yml). If either is renamed, update them too.
+  #
+  # What CI can't do: install dependencies, typecheck or build. The Muse
+  # Space SDK (@hatch/space-sdk in package.json) is a local file dependency
+  # that exists only inside a Muse Space, so `bun run typecheck` and
+  # `bun run build` run there. These checks need nothing from it.
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tool versions
+        run: |
+          node --version
+          python3 --version
+          jq --version
+      - name: Nothing ignored is committed
+        # The Space's database, build output, dependencies and install cache
+        # are .gitignore'd; this catches one added with `git add -f`.
+        run: |
+          bad=$(git ls-files -ci --exclude-standard)
+          if [ -n "$bad" ]; then
+            echo "tracked files that .gitignore excludes: $bad"
+            exit 1
+          fi
+      - name: Manifests parse
+        run: |
+          jq -e '.runtime and .entry and .slug' space.json > /dev/null
+          jq -e '.devDependencies.typescript' package.json > /dev/null
+      - name: TypeScript sources parse
+        # The TypeScript version package.json pins, installed on its own.
+        run: |
+          set -euo pipefail
+          TS_VERSION=$(jq -r '.devDependencies.typescript' package.json)
+          npm install --prefix "$RUNNER_TEMP/ts" --no-save --ignore-scripts --no-audit --no-fund "typescript@$TS_VERSION"
+          git ls-files -z -- '*.ts' '*.tsx' '*.mjs' ':!:.github/**' \
+            | NODE_PATH="$RUNNER_TEMP/ts/node_modules" xargs -0 node .github/scripts/check-ts-syntax.mjs
+      - name: Relative Markdown links resolve
+        run: git ls-files -z -- '*.md' | xargs -0 python3 .github/scripts/check-md-links.py
