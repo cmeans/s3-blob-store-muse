@@ -69,7 +69,8 @@ Select **Test connection**. The console calls the store's health check
 | Message | What it means |
 |---|---|
 | Connected — the store answered ok and accepted the token. | Working. |
-| Unauthorized (HTTP 401) — the store rejected the token. | Wrong token: not the one this store was deployed with, or its SHA-256 digest instead of the token. Select **Edit** and paste it again. HTTP 403 shows the same way. |
+| Unauthorized (HTTP 401) — the store rejected the token. | Wrong token: not the one this store was deployed with, or its SHA-256 digest instead of the token. Select **Edit** and paste it again. |
+| Unauthorized (HTTP 403) — the store rejected the token. | Despite the message, not the token: a 403 comes from AWS before the store's code runs. The deploy is missing its Function URL permission, or the URL isn't this store's. Check the deploy, not the token. |
 | Unreachable — the Function URL did not answer. Check the URL and try again. | Wrong URL, or the store isn't deployed. Check the URL against your deployment's output. |
 | No store configured — save the Function URL and token first. | Nothing is saved yet. Fill in both fields first. |
 | Unexpected answer from the store (HTTP *n*). | The address answered with another status: a store error, or a URL that points at something else. |
@@ -154,9 +155,10 @@ The console was verified live against a store deployed with Terraform
 on 2026-11-20: connection check and round trip by label.
 
 Not yet run from this repository: building the Space from its URL
-(step 1) and the browser check (step 3). Both follow from how Muse
-builds Spaces and from the code, and both are part of the live
-re-verification against a store deployed with the store's upcoming
-CloudFormation flow, tracked in
+(step 1), the browser check (step 3), and the agent logging an
+operation through `registerExternalOperation`. They follow from how
+Muse builds Spaces and from the code, and all three are part of the
+live re-verification against a store deployed with the store's
+upcoming CloudFormation flow, tracked in
 [#5](https://github.com/cmeans/s3-blob-store-muse/issues/5). Its
 result goes here.

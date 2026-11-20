@@ -35,8 +35,10 @@ that reads "Ciphertext only — never the plaintext secret."
   **Fetch**, **Store** and **Delete**. Fetch fills the text box with
   what is stored under the label. Store creates or replaces the blob.
   Delete asks for a second click, because the store keeps no old
-  versions. A blob can be up to 5,000,000 characters (the store's
-  Function URL takes at most 6 MB per request).
+  versions, and reports success even when nothing was stored under the
+  label. A blob can be up to 5,000,000 characters of ASCII text, such
+  as base64 ciphertext (the store's Function URL takes at most 6 MB
+  per request).
 - **History.** Every fetch, store and delete the console has done
   successfully, newest first, with the labels it knows about and the
   last action on each. Clicking a label puts it in the label field.
