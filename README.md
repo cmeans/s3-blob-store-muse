@@ -18,7 +18,8 @@ have a deployed store, start with
 [s3-blob-store](https://github.com/cmeans/s3-blob-store): this console
 does nothing without one.
 
-To install it, see [SETUP.md](SETUP.md).
+To install it, see [SETUP.md](SETUP.md). To have your assistant
+install and check it for you, point it at [SKILL.md](SKILL.md).
 
 ## What it does
 
