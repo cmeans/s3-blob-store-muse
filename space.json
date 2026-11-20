@@ -1,0 +1,8 @@
+{
+  "runtime": "typescript",
+  "platformVersion": 29,
+  "entry": "client/dist/index.html",
+  "name": "s3-blob-store-muse",
+  "slug": "s3-blob-store-muse",
+  "managedCronJobs": []
+}

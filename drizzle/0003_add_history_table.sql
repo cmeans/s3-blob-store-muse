@@ -1,0 +1,7 @@
+CREATE TABLE history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  action TEXT NOT NULL,
+  size INTEGER,
+  created_at INTEGER NOT NULL
+);
