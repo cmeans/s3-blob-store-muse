@@ -29,9 +29,10 @@ Checked:
 
 Not modeled, so refused with an error saying so (extend this script if the
 repo starts using one). The checks that depend on the modeled shape are
-skipped; only the basic errors found before the refusal (an unknown
+skipped; only the basic errors from the same first pass (an unknown
 lockfileVersion, no root workspace, a non-string version in package.json)
-are reported with it. Refused: more than one
+are reported with it. Refused: a registry dependency in package.json, other
+than a peer, that isn't an exact version (a range, a tag, or "=1.2.3"); more than one
 workspace; aliases and URL or git specs ("npm:", "github:", "git+",
 "https:", "workspace:", "link:", and file: folders or relative paths);
 package.json's overrides, resolutions, workspaces, catalog(s) and
@@ -150,8 +151,15 @@ def load(path: str, lockfile: bool):
         return json.loads(text, object_pairs_hook=no_duplicate_keys)
     except LockError:
         raise
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
         raise LockError(f"can't read or parse: {e}") from None
+
+
+def annotation(msg: str) -> str:
+    """Escape a message for a ::error workflow command, as GitHub's own
+    toolkit does: %, CR and LF. Values in messages already go through repr,
+    so this is a second line of defense."""
+    return msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
 def dict_field(obj: dict, field: str) -> dict:
@@ -170,15 +178,15 @@ def main(argv: list[str]) -> int:
 
     def refuse(what: str, path: str = lock_path) -> None:
         """A shape this check doesn't model. The checks that depend on the
-        modeled shape are skipped, since they would only misread it; basic
-        errors found before it are reported with it."""
+        modeled shape are skipped, since they would only misread it; the
+        basic errors from the same first pass are reported with it."""
         refusals.append((path, f"{what}, which this check doesn't model; extend check-bun-lock.py"))
 
     for path, lockfile in ((lock_path, True), (pkg_path, False)):
         try:
             data = load(path, lockfile)
         except LockError as e:
-            print(f"::error file={path}::{e}")
+            print(f"::error file={path}::{annotation(str(e))}")
             return 1
         if not isinstance(data, dict):
             print(f"::error file={path}::not a JSON object")
@@ -222,11 +230,18 @@ def main(argv: list[str]) -> int:
             elif ":" in want:
                 refuse(f"{field} {dep!r} uses {want!r} (an alias, or a URL, git, workspace, "
                        "link or file-folder spec)", pkg_path)
+            elif field != "peerDependencies" and not EXACT.fullmatch(want):
+                # This repo pins every registry dependency exactly, so the
+                # pin can be checked against the lock. A range, a tag or a
+                # spelling such as "=1.2.3" or "1.2.3 " can't be. (A peer is
+                # a range by nature, and isn't compared with the lock.)
+                refuse(f"{field} {dep!r} is {want!r}, not an exact version", pkg_path)
 
     if refusals:
         for path, msg in refusals + errors:
-            print(f"::error file={path}::{msg}")
-        print(f"{lock_path}: not checked: {len(refusals)} shapes this check doesn't model")
+            print(f"::error file={path}::{annotation(msg)}")
+        n = len(refusals)
+        print(f"{lock_path}: not checked: {n} {'shape' if n == 1 else 'shapes'} this check doesn't model")
         return 1
 
     if ws.get("name") != pkg.get("name"):
@@ -305,7 +320,7 @@ def main(argv: list[str]) -> int:
             err(f"package {key!r} isn't depended on by the workspace or any package")
 
     for path, msg in errors:
-        print(f"::error file={path}::{msg}")
+        print(f"::error file={path}::{annotation(msg)}")
     print(f"{lock_path}: {len(packages)} packages, {len(errors)} problems")
     return 1 if errors else 0
 
