@@ -22,25 +22,26 @@ To install it, see [SETUP.md](SETUP.md).
 
 ## What it does
 
-The console is one page with three sections, under a fixed line that
-reads "Ciphertext only — never the plaintext secret."
+The console is one page with three sections, under a line at the top
+that reads "Ciphertext only — never the plaintext secret."
 
 - **Setup.** The store's Function URL and bearer token, entered once
   and saved by the Space's server. After saving, the page shows the
   URL and "Token: saved", never the token. **Test connection** calls
   the store's health check and reports one of: connected, unauthorized
   (the store rejected the token), unreachable, or an unexpected HTTP
-  status. **Edit** replaces the URL or the token.
+  status. **Edit** replaces them; saving needs both again.
 - **Blob.** A label field, a text box for the ciphertext, and
   **Fetch**, **Store** and **Delete**. Fetch fills the text box with
   what is stored under the label. Store creates or replaces the blob.
   Delete asks for a second click, because the store keeps no old
-  versions.
-- **History.** Every fetch, store and delete the console has made,
-  newest first, with the labels it knows about and the last action on
-  each. Clicking a label puts it in the label field. The store itself
-  can't list its bucket, so this record is the only list of labels
-  there is (see below).
+  versions. A blob can be up to 5,000,000 characters (the store's
+  Function URL takes at most 6 MB per request).
+- **History.** Every fetch, store and delete the console has done
+  successfully, newest first, with the labels it knows about and the
+  last action on each. Clicking a label puts it in the label field.
+  The store itself can't list its bucket, so this record is the only
+  list of labels there is (see below).
 
 ## How it works
 
@@ -64,19 +65,24 @@ token as an `Authorization: Bearer` header and calls the store.
 - `space.json`: the Space's manifest, written by Muse's builder.
 
 A label is up to 128 letters, digits, dots, dashes and underscores,
-and starts with a letter or digit: that's the store's rule. (The
-console doesn't check the first character yet, so a label like `.x`
-reaches the store and fails with HTTP 400.)
+and starts with a letter or digit: that's the store's rule. Stick to
+it: the console doesn't check the first character yet (#9). A label
+like `.x` fails with HTTP 400, and `.` and `..` don't address a blob
+at all (fetching `..` returns the store's health check, `ok`).
 
 ## The history is the console's, not the bucket's
 
 The store can't list its bucket: its Lambda role has no list
 permission, by design. So the console keeps its own record of every
-fetch, store and delete it makes (label, action, size and time), and
-shows the labels it knows from that record.
+fetch, store and delete that succeeds (label, action, size and time),
+and shows the labels it knows from that record. A fetch that finds
+nothing, or a call that fails, isn't recorded. The page shows the
+newest 100 operations: a label whose last operation is older than
+that drops out of the list on the page, though its rows stay in the
+database.
 
-When your agent stores or fetches a blob through its own connection,
-the console doesn't see it. `registerExternalOperation` lets the agent
+When your agent stores, fetches or deletes a blob through its own
+connection, the console doesn't see it. `registerExternalOperation` lets the agent
 add that operation to the same record, so the console's view stays
 complete. It writes only to the console's own database and never
 contacts the store.

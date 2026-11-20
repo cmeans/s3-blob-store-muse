@@ -11,14 +11,16 @@ You need:
 - **Muse.** The browser check in step 3 needs Muse on the web, in a
   desktop browser. On a phone you can do everything else.
 - **A deployed [s3-blob-store](https://github.com/cmeans/s3-blob-store).**
-  Deploying it leaves you with two things:
-  - its **Function URL**, an `https://` address ending in
-    `.lambda-url.<region>.on.aws/`;
-  - its **bearer token**, 64 hex characters, kept in a password
-    manager or Muse's credential store and nowhere else.
+  From its deploy you need two things:
+  - its **Function URL**, the deploy's Function URL output: an
+    `https://` address ending in `.lambda-url.<region>.on.aws/`;
+  - its **bearer token**: the plaintext token, 64 hex characters, that
+    you generated for the deploy and saved in your password manager.
+    Not its SHA-256 digest, which is also 64 hex characters: the deploy
+    gives AWS only the digest, and the console needs the token itself.
 
 Keep the token out of the chat: you'll paste it only into the
-console's token field.
+console's token field. The console then keeps its own copy (step 4).
 
 ## 1. Install the Space
 
@@ -67,8 +69,9 @@ Select **Test connection**. The console calls the store's health check
 | Message | What it means |
 |---|---|
 | Connected — the store answered ok and accepted the token. | Working. |
-| Unauthorized (HTTP 401) — the store rejected the token. | Wrong token, or not the token this store was deployed with. Select **Edit** and paste it again. HTTP 403 shows the same way. |
-| Unreachable — the Function URL did not answer. | Wrong URL, or the store isn't deployed. Check the URL against your deployment's output. |
+| Unauthorized (HTTP 401) — the store rejected the token. | Wrong token: not the one this store was deployed with, or its SHA-256 digest instead of the token. Select **Edit** and paste it again. HTTP 403 shows the same way. |
+| Unreachable — the Function URL did not answer. Check the URL and try again. | Wrong URL, or the store isn't deployed. Check the URL against your deployment's output. |
+| No store configured — save the Function URL and token first. | Nothing is saved yet. Fill in both fields first. |
 | Unexpected answer from the store (HTTP *n*). | The address answered with another status: a store error, or a URL that points at something else. |
 
 ### One round trip
@@ -79,7 +82,8 @@ Use test text, not a secret.
    letters, digits, dots, dashes and underscores, and start with a
    letter or digit.
 2. Type a line of test text in the text box, for example
-   `round trip test`, and select **Store**. Expect
+   `round trip test`, without pressing Enter (a newline counts as a
+   character), and select **Store**. Expect
    `Stored 15 characters under "setup-check".`
 3. Clear the text box and select **Fetch**. Your text comes back, and
    the message says `Fetched 15 characters.`
@@ -99,15 +103,16 @@ This needs Muse on the web, in a desktop browser with developer tools.
 1. Open the console, then the developer tools' **Network** tab, and
    reload the page.
 2. Select **Test connection**, then **Fetch** any label.
-3. Look at the requests:
-   - they all go to the Space's own address (its `actions` endpoint);
+3. Look at the console's requests (Muse's own page may make others):
+   - they go to the Space's own `actions` endpoint;
    - none goes to the store's address (`….lambda-url.….on.aws`): the
      Space's server calls the store, not your browser;
    - no response contains the token. The setup state reports only the
      Function URL and whether a token is saved.
 
-The one request that does carry the token is the **Save** itself,
-from your browser to the Space's own server. It never comes back.
+The one request that does carry the token is the save, from your
+browser to the Space's own server: **Save**, or **Test connection**
+with new values in the form. It never comes back.
 
 On a phone, without developer tools, the check you have is the one in
 step 2: once saved, the token is never shown again.
@@ -138,15 +143,16 @@ test again.
 
 The console records only what it does itself. When your agent stores,
 fetches or deletes a blob through its own connection, ask it to log
-the operation with the console's `registerExternalOperation` action
-(label, action, and optionally the size). It writes to the console's
-history only and never contacts the store.
+the operation with the console's `registerExternalOperation` action:
+the label, the action (`stored`, `fetched` or `deleted`), and
+optionally the size. It writes to the console's history only and
+never contacts the store.
 
 ## Verified
 
 The console was verified live against a store deployed with Terraform
 on 2026-11-20: connection check and round trip by label. A
-re-verification against a store deployed with the store's current
+re-verification against a store deployed with the store's upcoming
 CloudFormation flow is tracked in
 [#5](https://github.com/cmeans/s3-blob-store-muse/issues/5), and its
 result goes here.

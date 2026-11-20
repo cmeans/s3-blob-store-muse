@@ -1,8 +1,9 @@
 // Drizzle schema for this space.
 //
-// One table: `config`, a single-row table (id = 1) holding the operator's
+// Two tables. `config` is a single-row table (id = 1) holding the operator's
 // S3 blob store connection — the Lambda Function URL and its bearer token.
 // The token is stored server-side only; no action ever returns it.
+// `history` is the console's own operation record (below).
 
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
