@@ -1,5 +1,7 @@
 node_modules/
+.bun-cache/
 app.db
+app.db-*
 client/dist/
 client/dist-cvm/
 server/dist/
