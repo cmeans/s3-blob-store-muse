@@ -72,4 +72,6 @@ jobs:
             | NODE_PATH="$RUNNER_TEMP/ts/node_modules" xargs -0 -r node .github/scripts/check-ts-syntax.mjs
       - name: Relative Markdown links resolve
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: git ls-files -z -- '*.md' | xargs -0 -r python3 .github/scripts/check-md-links.py
+        run: |
+          set -euo pipefail
+          git ls-files -z -- '*.md' | xargs -0 -r python3 .github/scripts/check-md-links.py
