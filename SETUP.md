@@ -79,9 +79,13 @@ Select **Test connection**. The console calls the store's health check
 
 Use test text, not a secret.
 
-1. In **Blob**, enter the label `setup-check`. Labels are up to 128
-   letters, digits, dots, dashes and underscores, and start with a
-   letter or digit.
+1. In **Blob**, enter the label `setup-check` and select **Fetch**.
+   Expect `Not found — no blob under "setup-check".` If the text box
+   fills in instead (`Fetched … characters.`), that label is in use:
+   don't store or delete under it. Pick another, such as
+   `setup-check-2`, and use it below. Labels are up to 128 letters,
+   digits, dots, dashes and underscores, and start with a letter or
+   digit.
 2. Type a line of test text in the text box, for example
    `round trip test`, without pressing Enter (a newline counts as a
    character), and select **Store**. Expect
