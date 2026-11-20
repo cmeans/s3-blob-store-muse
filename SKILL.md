@@ -79,8 +79,9 @@ When the build finishes, tell the user where the console is.
 3. The user selects **Test connection**, which saves both fields, then
    tests.
 4. Check the saved URL with `getConfigState`. It returns `configured`
-   and `functionUrl`, and never the token. `functionUrl` must be
-   exactly the URL from step 1.
+   and `functionUrl`, and never the token. `functionUrl` must be the
+   URL from step 1, ignoring a trailing slash: the console strips it
+   before every call, as SETUP says.
 
 ## 3. Verify
 
