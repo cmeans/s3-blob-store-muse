@@ -67,7 +67,15 @@ token as an `Authorization: Bearer` header and calls the store.
     console's own record (see below).
 - `server/src/schema.ts` and `drizzle/`: the Space's database schema
   and migrations, a one-row `config` table and a `history` table. The
-  database file itself is never committed.
+  database file itself is never committed. `drizzle/meta/_journal.json`
+  lists the migrations, and drizzle's migrator applies only what it
+  lists. To add a migration, add its `.sql` file and a journal entry
+  with the next `idx`, the file name (without `.sql`) as `tag`, and a
+  `when` later than every earlier entry's. A migration that isn't in
+  the journal, or whose `when` isn't later, is skipped without an
+  error on a console that already has a database. Never edit a
+  migration that has been applied: add a new one. (Entries 0 and 1
+  share a `when`, from the live Space, which is fine for them only.)
 - `space.json`: the Space's manifest, written by Muse's builder.
 
 A label is up to 128 letters, digits, dots, dashes and underscores,
