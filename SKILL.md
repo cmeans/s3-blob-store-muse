@@ -80,8 +80,10 @@ When the build finishes, tell the user where the console is.
    tests.
 4. Check the saved URL with `getConfigState`. It returns `configured`
    and `functionUrl`, and never the token. `functionUrl` must be the
-   URL from step 1, ignoring a trailing slash: the console strips it
-   before every call, as SETUP says.
+   URL from step 1, ignoring trailing slashes, which don't matter
+   (SETUP step 2): the console strips them before every call. If it
+   differs, stop: tell the user, and have them select **Edit** and
+   enter the deploy's URL themselves. Don't go on to step 3.
 
 ## 3. Verify
 
