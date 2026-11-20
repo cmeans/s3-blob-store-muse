@@ -59,6 +59,11 @@ jobs:
             || { echo "::error file=space.json::runtime, entry and slug must be non-empty strings"; exit 1; }
           jq -e '.devDependencies.typescript | type == "string" and length > 0' package.json > /dev/null \
             || { echo "::error file=package.json::devDependencies.typescript must be a non-empty string"; exit 1; }
+      - name: bun.lock matches package.json
+        # Can't install (the Space SDK is a file: tarball inside Muse), so
+        # this checks the lockfile's structure against package.json instead.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 .github/scripts/check-bun-lock.py bun.lock package.json
       - name: TypeScript and JavaScript sources parse
         # The TypeScript version package.json pins, installed on its own.
         # Parser errors only: errors TypeScript reports from its checker
