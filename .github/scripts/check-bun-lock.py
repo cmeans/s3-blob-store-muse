@@ -7,17 +7,22 @@ CI can't run `bun install --frozen-lockfile`: @hatch/space-sdk is a file:
 tarball that exists only inside Muse. This checks what can be checked from
 the two files alone:
 
-- bun.lock parses (bun's text format allows trailing commas);
-- the workspace's name, dependencies and devDependencies equal package.json's;
-- every package key names the package its spec resolves (a nested key such as
-  "prop-types/react-is" ends with the spec's name);
+- bun.lock parses (bun's text format allows trailing commas), and its
+  lockfileVersion is one this script knows;
+- the workspace's name and dependency maps equal package.json's;
+- every package key names the package its spec resolves: the key's last
+  package name (a nested key such as "prop-types/react-is" ends with it)
+  equals the spec's name, unless the workspace declares that name with an
+  alias or URL spec (one containing ":", such as "npm:other@1");
 - a dependency package.json pins exactly resolves to that version;
 - every registry package has a sha512 integrity;
 - every package's dependencies, and the workspace's, resolve to a package in
-  the lock.
+  the lock, looked up the way bun does: from the package's own nesting
+  outward, with scoped names ("@scope/name") kept whole.
 
-It doesn't check integrity values against the registry: that needs the
-network, and npm can't see the file: dependency anyway.
+Not checked: integrity values against the registry (that needs the network,
+and npm can't see the file: dependency), and whether the dependency ranges
+inside package entries are satisfied by what they resolve to.
 """
 
 import json
@@ -25,6 +30,8 @@ import re
 import sys
 
 EXACT = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$")
+KNOWN_LOCKFILE_VERSIONS = (1, 2)
+NO_INTEGRITY = ("/", "file:", "workspace:", "link:")
 
 
 def strip_trailing_commas(text: str) -> str:
@@ -67,17 +74,46 @@ def spec_name_version(spec: str) -> tuple[str, str]:
     return spec[:at], spec[at + 1:]
 
 
+def key_names(key: str) -> list[str]:
+    """'a/@s/b/c' -> ['a', '@s/b', 'c']: package names, scoped ones kept whole."""
+    parts, names, i = key.split("/"), [], 0
+    while i < len(parts):
+        if parts[i].startswith("@") and i + 1 < len(parts):
+            names.append(parts[i] + "/" + parts[i + 1])
+            i += 2
+        else:
+            names.append(parts[i])
+            i += 1
+    return names
+
+
 def resolve(packages: dict, parent: str, dep: str) -> str | None:
-    """The key bun would use for dep, seen from parent's key (nested first)."""
-    parts = parent.split("/") if parent else []
-    # Walk up the nesting: "a/b" looks for "a/b/dep", "a/dep", then "dep".
-    # Scoped names take two path parts, so try every prefix.
-    for cut in range(len(parts), -1, -1):
-        prefix = "/".join(parts[:cut])
+    """The key bun uses for dep, seen from parent's key: "a/b" looks for
+    "a/b/dep", then "a/dep", then "dep"."""
+    names = key_names(parent) if parent else []
+    for cut in range(len(names), -1, -1):
+        prefix = "/".join(names[:cut])
         key = f"{prefix}/{dep}" if prefix else dep
         if key in packages:
             return key
     return None
+
+
+def no_duplicate_keys(pairs: list) -> dict:
+    """json object hook: a repeated key is an error, not a silent last-wins."""
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            raise json.JSONDecodeError(f"duplicate key {k!r}", "", 0)
+        out[k] = v
+    return out
+
+
+def load_json(path: str, text_filter=None):
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    return json.loads(text_filter(text) if text_filter else text,
+                      object_pairs_hook=no_duplicate_keys)
 
 
 def main(argv: list[str]) -> int:
@@ -89,21 +125,29 @@ def main(argv: list[str]) -> int:
         errors.append(msg)
 
     try:
-        with open(lock_path, encoding="utf-8") as f:
-            lock = json.loads(strip_trailing_commas(f.read()))
-        with open(pkg_path, encoding="utf-8") as f:
-            pkg = json.load(f)
+        lock = load_json(lock_path, strip_trailing_commas)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
         print(f"::error file={lock_path}::can't read or parse: {e}")
         return 1
-
+    try:
+        pkg = load_json(pkg_path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        print(f"::error file={pkg_path}::can't read or parse: {e}")
+        return 1
+    if not isinstance(pkg, dict):
+        print(f"::error file={pkg_path}::not a JSON object")
+        return 1
     if not isinstance(lock, dict) or not isinstance(lock.get("packages"), dict):
         print(f"::error file={lock_path}::not a bun.lock: no packages map")
         return 1
-    if not isinstance(lock.get("lockfileVersion"), int):
-        err("lockfileVersion is missing or not a number")
 
-    ws = (lock.get("workspaces") or {}).get("")
+    version = lock.get("lockfileVersion")
+    if isinstance(version, bool) or version not in KNOWN_LOCKFILE_VERSIONS:
+        err(f"lockfileVersion {version!r} isn't one this check knows "
+            f"({', '.join(map(str, KNOWN_LOCKFILE_VERSIONS))}); update check-bun-lock.py")
+
+    workspaces = lock.get("workspaces")
+    ws = workspaces.get("") if isinstance(workspaces, dict) else None
     packages = lock["packages"]
     if not isinstance(ws, dict):
         err('no root workspace ("workspaces": {"": ...})')
@@ -115,28 +159,80 @@ def main(argv: list[str]) -> int:
         if (ws.get(field) or {}) != (pkg.get(field) or {}):
             err(f"workspace {field} differ from package.json's")
 
+    def entry_ok(key: str) -> bool:
+        e = packages.get(key)
+        return isinstance(e, list) and bool(e) and isinstance(e[0], str)
+
     for field in ("dependencies", "devDependencies"):
-        for dep, want in (pkg.get(field) or {}).items():
+        deps = pkg.get(field) or {}
+        if not isinstance(deps, dict):
+            err(f"package.json {field} isn't an object")
+            continue
+        for dep, want in deps.items():
             key = resolve(packages, "", dep)
             if key is None:
                 err(f"package.json {field} {dep!r} has no package in the lock")
                 continue
+            if not entry_ok(key):
+                continue  # reported in the package loop below
             _, got = spec_name_version(packages[key][0])
-            if EXACT.match(want) and got != want:
+            if isinstance(want, str) and EXACT.match(want) and got != want:
                 err(f"package.json pins {dep} {want}, the lock resolves {got}")
 
+    # Names a workspace declares with an alias or URL spec ("npm:", "github:",
+    # a tarball URL, "workspace:"): their keys don't have to match the spec.
+    declared = {}
+    for w in (workspaces or {}).values() if isinstance(workspaces, dict) else ():
+        if isinstance(w, dict):
+            for f in ("dependencies", "devDependencies", "optionalDependencies"):
+                for d, s in (w.get(f) or {}).items():
+                    declared[d] = s
+
+    # Every package must be reachable: depended on by the workspace or by
+    # another package (any dependency map). An orphan means a hand edit.
+    referenced = set()
+    all_ws = [w for w in workspaces.values() if isinstance(w, dict)] if isinstance(workspaces, dict) else []
+    for w in all_ws:
+        for field in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+            wdeps = w.get(field) or {}
+            for dep in (wdeps if isinstance(wdeps, dict) else {}):
+                k = resolve(packages, "", dep)
+                if k:
+                    referenced.add(k)
+    for key in packages:
+        if not entry_ok(key):
+            continue
+        meta = next((e for e in packages[key][1:] if isinstance(e, dict)), {})
+        for field in ("dependencies", "optionalDependencies", "peerDependencies"):
+            fdeps = meta.get(field) or {}
+            for dep in (fdeps if isinstance(fdeps, dict) else {}):
+                k = resolve(packages, key, dep)
+                if k:
+                    referenced.add(k)
+    for key in packages:
+        if key not in referenced:
+            err(f"package {key!r} isn't depended on by the workspace or any package")
+
     for key, entry in packages.items():
-        if not isinstance(entry, list) or not entry or not isinstance(entry[0], str):
+        if not entry_ok(key):
             err(f"package {key!r}: entry isn't [spec, ...]")
             continue
-        name, version = spec_name_version(entry[0])
-        if key != name and not key.endswith("/" + name):
+        name, ver = spec_name_version(entry[0])
+        names = key_names(key)
+        last = names[-1]
+        # Only a top-level key can be a workspace's aliased dependency.
+        aliased = len(names) == 1 and ":" in str(declared.get(last, ""))
+        if last != name and not aliased:
             err(f"package key {key!r} doesn't match its spec {entry[0]!r}")
-        is_file = version.startswith("/") or version.startswith("file:")
-        if not is_file and not (isinstance(entry[-1], str) and entry[-1].startswith("sha512-")):
-            err(f"package {key!r}: no sha512 integrity")
+        if not ver.startswith(NO_INTEGRITY) and ":" not in str(declared.get(last, "")):
+            if not (isinstance(entry[-1], str) and entry[-1].startswith("sha512-")):
+                err(f"package {key!r}: no sha512 integrity")
         meta = next((e for e in entry[1:] if isinstance(e, dict)), {})
-        for dep in (meta.get("dependencies") or {}):
+        deps = meta.get("dependencies") or {}
+        if not isinstance(deps, dict):
+            err(f"package {key!r}: dependencies isn't an object")
+            continue
+        for dep in deps:
             if resolve(packages, key, dep) is None:
                 err(f"package {key!r} depends on {dep!r}, which isn't in the lock")
 
