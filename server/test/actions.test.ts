@@ -3,7 +3,7 @@
 // Run with bun from the repo root: `bun test server/test`. Needs zod and
 // drizzle-orm (the versions package.json pins) in node_modules, but not the
 // Space SDK: @hatch/space-sdk is replaced by ./sdk-stub.ts. CI's step
-// "Actions behave as tested" installs exactly those two and runs this.
+// "Server tests pass" installs exactly those two and runs this.
 //
 // - The database is real SQL: drizzle-orm on an in-memory bun:sqlite, set up
 //   by drizzle's own migrator from this repo's drizzle/ folder. The Space's

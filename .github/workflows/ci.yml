@@ -98,13 +98,26 @@ jobs:
             | grep -zE '\.([cm]?[jt]sx?)$')
           NODE_PATH="$RUNNER_TEMP/ts/node_modules" node .github/scripts/check-doc-quotes.mjs \
             --docs "${docs[@]}" --src "${src[@]}"
-      - name: Actions behave as tested
-        # server/test: each action in server/src/actions.ts against a local
-        # fake of the store (server/test/fake-store.ts), with a real drizzle
-        # on bun:sqlite set up by the drizzle/ migrations, and the Space SDK
-        # replaced by server/test/sdk-stub.ts. Installs only what the tests
-        # use, at the versions package.json pins: bun (its packageManager),
-        # zod and drizzle-orm.
+      - name: Drizzle journal matches the migrations
+        # drizzle/meta/_journal.json lists every drizzle/*.sql, once, with
+        # idx 0..n-1 and each `when` later than the one before (from the
+        # third entry on; the first two share one, from the live Space): the
+        # migrator skips a file the journal doesn't list, or an entry that
+        # isn't later, without a word. It can't tell an edited migration
+        # from the original.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: bash .github/scripts/check-drizzle-journal.sh drizzle
+      - name: Server tests pass
+        # server/test, under bun test:
+        # - actions.test.ts: each action in server/src/actions.ts against a
+        #   local fake of the store (server/test/fake-store.ts), with a real
+        #   drizzle on bun:sqlite set up by the drizzle/ migrations, and the
+        #   Space SDK replaced by server/test/sdk-stub.ts;
+        # - schema-migrations.test.ts: the tables the drizzle/ migrations
+        #   build match server/src/schema.ts (columns, types and
+        #   constraints; views by name).
+        # Installs only what the tests use, at the versions package.json
+        # pins: bun (its packageManager), zod and drizzle-orm.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         timeout-minutes: 5
         run: |
