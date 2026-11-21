@@ -1,0 +1,20 @@
+// A stand-in for the part of @hatch/space-sdk that server/src/actions.ts
+// uses, for the behavior tests. The SDK itself exists only inside a Muse
+// Space, so CI can't install it. This is this repo's own code: nothing from
+// the SDK is copied here.
+//
+// - defineAction: returns the definition as given. The tests validate the
+//   request and response with its zod schemas themselves (see actions.test.ts
+//   `call`), as the Space runtime does around a handler.
+// - z: zod, the version package.json pins (the SDK re-exports it).
+//
+// The real SDK's types (Ctx, ActionsModule) are only imported as types by
+// actions.ts, so they need nothing here. Muse's typecheck on code PRs stays
+// the check against the real SDK: this stub can drift from it, and the tests
+// check behavior only.
+
+export { z } from "zod";
+
+export function defineAction<T>(definition: T): T {
+  return definition;
+}
