@@ -80,6 +80,22 @@ jobs:
         run: |
           set -euo pipefail
           git ls-files -z -- '*.md' | xargs -0 -r python3 .github/scripts/check-md-links.py
+      - name: Messages the docs quote are in the code
+        # Each quoted console message (inline code that starts with a capital
+        # letter, contains a space and ends with a period) must match a
+        # string in server/src or client/src. Uses the pinned TypeScript, as
+        # the parse step above does; installing it again is a no-op when that
+        # step already did, and keeps this step independent of it.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          TS_VERSION=$(jq -r '.devDependencies.typescript' package.json)
+          npm install --prefix "$RUNNER_TEMP/ts" --no-save --ignore-scripts --no-audit --no-fund "typescript@$TS_VERSION"
+          mapfile -d '' docs < <(git ls-files -z -- '*.md')
+          mapfile -d '' src < <(git ls-files -z -- 'server/src/*' 'client/src/*' \
+            | grep -zE '\.([cm]?[jt]sx?)$')
+          NODE_PATH="$RUNNER_TEMP/ts/node_modules" node .github/scripts/check-doc-quotes.mjs \
+            --docs "${docs[@]}" --src "${src[@]}"
       - name: Workflows pass actionlint
         # actionlint's own image, pinned by digest (the multi-arch index for
         # tag 1.7.12). It bundles ShellCheck 0.11.0, so run: scripts are

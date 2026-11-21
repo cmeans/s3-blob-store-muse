@@ -53,8 +53,8 @@ what it did, because the store can't list its bucket.
   the user named, after they confirmed, or on your own test label.
 - **Ciphertext only.** The store, and so the console, is for encrypted
   blobs. Never store a plaintext secret through it, and never put a
-  real secret in a test. The page says so at the top: "Ciphertext only
-  — never the plaintext secret."
+  real secret in a test. The page says so at the top: `Ciphertext only
+  — never the plaintext secret.`
 
 ## 1. Install
 

@@ -26,7 +26,7 @@ install and check it for you, point it at [SKILL.md](SKILL.md).
 ## What it does
 
 The console is one page with three sections, under a line at the top
-that reads "Ciphertext only — never the plaintext secret."
+that reads `Ciphertext only — never the plaintext secret.`
 
 - **Setup.** The store's Function URL and bearer token, entered once
   and saved by the Space's server. After saving, the page shows the
