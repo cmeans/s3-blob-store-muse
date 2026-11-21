@@ -81,9 +81,11 @@ token as an `Authorization: Bearer` header and calls the store.
   CI checks the journal against the `.sql` files (every file listed,
   in order, each `when` later), and the tables the migrations build
   against `schema.ts` (columns, types and constraints; views by name
-  only), so a table change without its migration fails. It doesn't
-  see triggers, or an edited migration that has already been applied:
-  those are yours to keep right.
+  only), so most table changes without their migration fail. A few
+  aren't compared (a CHECK's expression, an index's WHERE clause and
+  others: the list is in `server/test/schema-migrations.test.ts`'s
+  header), and CI doesn't see triggers, or an edited migration that has
+  already been applied: those are yours to keep right.
 - `space.json`: the Space's manifest, written by Muse's builder.
 
 A label is up to 128 letters, digits, dots, dashes and underscores,

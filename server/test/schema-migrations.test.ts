@@ -4,8 +4,8 @@
 // migrator, then compares what it built with what schema.ts declares:
 // - the same tables, and no others;
 // - in each, the same columns, with the same SQL type, NOT NULL, primary
-//   key (composite ones included), AUTOINCREMENT and SQL default (a value
-//   as the driver stores it, or a sql`` expression's text);
+//   key (composite ones included), AUTOINCREMENT and SQL default (as SQL
+//   text: a string as its quoted literal, an expression as written);
 // - the same indexes (by columns and uniqueness; unique() columns and
 //   unique constraints count as unique indexes, as SQLite builds them), the
 //   same foreign keys (columns, target table and columns, ON DELETE and ON
@@ -17,8 +17,10 @@
 // Not compared: a view's query (only its name); triggers, which schema.ts
 // can't declare, so a migration's trigger passes unseen; a CHECK's
 // expression (only its name) and unnamed CHECKs; an index's WHERE clause;
-// and $defaultFn defaults, which run in JS and never reach SQL. The journal
-// itself (every .sql in it, in order) is checked by
+// and $defaultFn defaults, which run in JS and never reach SQL. Names are
+// compared as written, case included, though SQLite ignores case in them:
+// a schema.ts name and its migration's should match exactly anyway. The
+// journal itself (every .sql in it, in order) is checked by
 // .github/scripts/check-drizzle-journal.sh.
 
 import { Database } from "bun:sqlite";
@@ -33,9 +35,41 @@ import * as schema from "../src/schema";
 const MIGRATIONS = fileURLToPath(new URL("../../drizzle", import.meta.url));
 const dialect = new SQLiteSyncDialect();
 
-// SQLite reports a default expression without its outer parentheses:
-// DEFAULT (unixepoch()) comes back as unixepoch().
-const stripParens = (s: string) => (/^\(.*\)$/s.test(s) ? s.slice(1, -1) : s);
+// Defaults are compared as SQL text: a string as its quoted literal
+// ('plain'), a number as itself, NULL as NULL, an expression as written.
+// So a string default and an expression with the same text differ, as they
+// do in the rows they give.
+//
+// SQLite reports a default expression without its outer parentheses
+// (DEFAULT (unixepoch()) comes back as unixepoch()), and drizzle-kit may
+// add a pair, so balanced outer parentheses are stripped from both sides.
+function stripParens(s: string): string {
+  for (;;) {
+    s = s.trim();
+    if (!s.startsWith("(")) return s;
+    let depth = 0;
+    let end = -1;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === "(") depth++;
+      else if (s[i] === ")" && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    if (end !== s.length - 1) return s; // "(1) + (2)": not one outer pair
+    s = s.slice(1, -1);
+  }
+}
+
+/** A JS default value as the SQL literal it's stored as. */
+const literal = (v: unknown) =>
+  v === null ? "NULL" : typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : String(v);
+
+/** SQLite's TRUE and FALSE are 1 and 0; drizzle stores a boolean as 1 or 0. */
+const normalizeDefault = (s: string) => {
+  const t = stripParens(s);
+  return /^true$/i.test(t) ? "1" : /^false$/i.test(t) ? "0" : t;
+};
 
 type Column = {
   type: string;
@@ -98,8 +132,8 @@ function declared(): Record<string, Record<string, Column>> {
       if (c.default !== undefined && typeof c.default !== "function") {
         sqlDefault =
           typeof c.default === "object" && c.default !== null && "queryChunks" in c.default
-            ? stripParens(dialect.sqlToQuery(c.default as never).sql) // a sql`` default
-            : String(c.mapToDriverValue(c.default)); // a value, as the driver stores it
+            ? normalizeDefault(dialect.sqlToQuery(c.default as never).sql) // a sql`` default
+            : normalizeDefault(literal(c.mapToDriverValue(c.default))); // a value, as its SQL literal
       }
       const type = c.getSQLType().toUpperCase();
       columns[c.name] = {
@@ -222,18 +256,13 @@ function built(): Record<string, Record<string, Column>> {
         // SQLite allows AUTOINCREMENT only on an INTEGER PRIMARY KEY, so a
         // table's keyword belongs to its primary key column.
         autoIncrement: autoIncrement && c.pk > 0,
-        default: c.dflt_value === null ? null : unquote(c.dflt_value),
+        default: c.dflt_value === null ? null : normalizeDefault(c.dflt_value),
       };
     }
     out[t.name] = columns;
   }
   sqlite.close();
   return out;
-}
-
-/** SQLite reports a string default with its quotes: 'x' -> x. */
-function unquote(v: string): string {
-  return /^'.*'$/s.test(v) ? v.slice(1, -1).replace(/''/g, "'") : v;
 }
 
 // The comparisons below are of sorted lists of one-line strings, each

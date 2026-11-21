@@ -115,7 +115,7 @@ jobs:
         #   Space SDK replaced by server/test/sdk-stub.ts;
         # - schema-migrations.test.ts: the tables the drizzle/ migrations
         #   build match server/src/schema.ts (columns, types and
-        #   constraints).
+        #   constraints; views by name).
         # Installs only what the tests use, at the versions package.json
         # pins: bun (its packageManager), zod and drizzle-orm.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}

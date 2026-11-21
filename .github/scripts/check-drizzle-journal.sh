@@ -20,6 +20,7 @@
 # 1 with an ::error line for each problem, 2 on a usage error. Needs jq.
 set -uo pipefail
 
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || { echo "::error::check-drizzle-journal.sh needs bash 4 or later (this is $BASH_VERSION)"; exit 2; }
 [ $# -eq 1 ] || { echo "usage: check-drizzle-journal.sh <drizzle folder>" >&2; exit 2; }
 command -v jq > /dev/null || { echo "::error::check-drizzle-journal.sh needs jq, and it isn't on PATH"; exit 2; }
 d=$1
@@ -29,6 +30,11 @@ err() { echo "::error file=$1::$2"; fail=1; }
 
 if [ ! -f "$j" ]; then
   err "$j" "$j doesn't exist"
+  exit 1
+fi
+# jq accepts a UTF-8 byte order mark; drizzle's migrator (JSON.parse) doesn't.
+if [ "$(head -c3 "$j" | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  err "$j" "$j starts with a UTF-8 byte order mark, which drizzle's migrator can't parse: save it without one"
   exit 1
 fi
 if ! jq -e '.entries | type == "array"' "$j" > /dev/null 2>&1; then
