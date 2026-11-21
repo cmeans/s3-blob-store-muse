@@ -80,9 +80,10 @@ token as an `Authorization: Bearer` header and calls the store.
   share a `when`, from the live Space, which is fine for them only.)
   CI checks the journal against the `.sql` files (every file listed,
   in order, each `when` later), and the tables the migrations build
-  against `schema.ts` (columns, types and constraints), so a schema
-  change without its migration fails. It can't tell an edited
-  migration that has already been applied: that rule is yours to keep.
+  against `schema.ts` (columns, types and constraints; views by name
+  only), so a table change without its migration fails. It doesn't
+  see triggers, or an edited migration that has already been applied:
+  those are yours to keep right.
 - `space.json`: the Space's manifest, written by Muse's builder.
 
 A label is up to 128 letters, digits, dots, dashes and underscores,

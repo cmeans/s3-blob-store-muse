@@ -9,13 +9,16 @@
 // - the same indexes (by columns and uniqueness; unique() columns and
 //   unique constraints count as unique indexes, as SQLite builds them), the
 //   same foreign keys (columns, target table and columns, ON DELETE and ON
-//   UPDATE), and the same named CHECK constraints (by name).
-// A schema.ts edit committed without its migration (or a migration without
-// its schema.ts edit) fails here.
+//   UPDATE), and the same named CHECK constraints (by name);
+// - the same views, by name.
+// A table edit in schema.ts committed without its migration (or a
+// migration without its schema.ts edit) fails here.
 //
-// Not compared: a CHECK's expression (only its name), an index's WHERE
-// clause, and $defaultFn defaults, which run in JS and never reach SQL. The
-// journal itself (every .sql in it, in order) is checked by
+// Not compared: a view's query (only its name); triggers, which schema.ts
+// can't declare, so a migration's trigger passes unseen; a CHECK's
+// expression (only its name) and unnamed CHECKs; an index's WHERE clause;
+// and $defaultFn defaults, which run in JS and never reach SQL. The journal
+// itself (every .sql in it, in order) is checked by
 // .github/scripts/check-drizzle-journal.sh.
 
 import { Database } from "bun:sqlite";
@@ -23,7 +26,7 @@ import { expect, test } from "bun:test";
 import { is } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { getTableConfig, SQLiteSyncDialect, SQLiteTable } from "drizzle-orm/sqlite-core";
+import { getTableConfig, getViewConfig, SQLiteSyncDialect, SQLiteTable, SQLiteView } from "drizzle-orm/sqlite-core";
 import { fileURLToPath } from "node:url";
 import * as schema from "../src/schema";
 
@@ -118,6 +121,24 @@ function declared(): Record<string, Record<string, Column>> {
 // written, so NOT NULL is compared as written there.
 function rowidAlias(singlePrimaryKey: boolean, type: string): boolean {
   return singlePrimaryKey && type === "INTEGER";
+}
+
+/** The views schema.ts declares, by name. */
+function declaredViews(): string[] {
+  return Object.values(schema)
+    .filter((v) => is(v, SQLiteView))
+    .map((v) => getViewConfig(v as SQLiteView).name)
+    .sort();
+}
+
+/** The views the migrations built, by name. */
+function builtViews(): string[] {
+  const sqlite = migrated();
+  const names = (sqlite.query("SELECT name FROM sqlite_master WHERE type = 'view'").all() as { name: string }[])
+    .map((r) => r.name)
+    .sort();
+  sqlite.close();
+  return names;
 }
 
 /** The migrated database's own tables: not SQLite's, not drizzle's journal. */
@@ -215,6 +236,26 @@ function unquote(v: string): string {
   return /^'.*'$/s.test(v) ? v.slice(1, -1).replace(/''/g, "'") : v;
 }
 
+// The comparisons below are of sorted lists of one-line strings, each
+// starting with its table (and column): bun prints only a few lines of
+// context around a diff, so each changed line has to say where it is.
+
+/** One line per column: "history.size: {...}". */
+const columnLines = (tables: Record<string, Record<string, Column>>) =>
+  Object.entries(tables)
+    .flatMap(([table, cols]) => Object.entries(cols).map(([name, c]) => `${table}.${name}: ${JSON.stringify(c)}`))
+    .sort();
+
+/** One line per index, foreign key and check: "history index: label unique". */
+const shapeLines = (tables: Record<string, Shape>) =>
+  Object.entries(tables)
+    .flatMap(([table, s]) => [
+      ...s.indexes.map((i) => `${table} index: ${i}`),
+      ...s.foreignKeys.map((f) => `${table} foreign key: ${f}`),
+      ...s.checks.map((c) => `${table} check: ${c}`),
+    ])
+    .sort();
+
 test("schema.ts declares at least one table", () => {
   expect(Object.keys(declared()).length).toBeGreaterThan(0);
 });
@@ -224,18 +265,13 @@ test("the migrations build the tables schema.ts declares, and no others", () => 
 });
 
 test("each table's columns match schema.ts", () => {
-  const want = declared();
-  const got = built();
-  for (const table of Object.keys(want)) {
-    // toEqual names the table and column in its diff on a mismatch.
-    expect({ [table]: got[table] }).toEqual({ [table]: want[table] });
-  }
+  expect(columnLines(built())).toEqual(columnLines(declared()));
 });
 
 test("each table's indexes, unique constraints, foreign keys and checks match schema.ts", () => {
-  const want = declaredShapes();
-  const got = builtShapes();
-  for (const table of Object.keys(want)) {
-    expect({ [table]: got[table] }).toEqual({ [table]: want[table] });
-  }
+  expect(shapeLines(builtShapes())).toEqual(shapeLines(declaredShapes()));
+});
+
+test("the migrations build the views schema.ts declares, and no others", () => {
+  expect(builtViews()).toEqual(declaredViews());
 });
