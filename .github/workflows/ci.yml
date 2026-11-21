@@ -80,3 +80,23 @@ jobs:
         run: |
           set -euo pipefail
           git ls-files -z -- '*.md' | xargs -0 -r python3 .github/scripts/check-md-links.py
+      - name: Workflows pass actionlint
+        # actionlint's own image, pinned by digest (the multi-arch index for
+        # tag 1.7.12). It bundles ShellCheck 0.11.0, so run: scripts are
+        # checked by a fixed ShellCheck, not whichever one the runner image
+        # has. Docker pulls the image; the container itself gets no network
+        # and a read-only checkout. To upgrade: take the new tag's index
+        # digest (`skopeo inspect --raw docker://docker.io/rhysd/actionlint:<tag>
+        # | sha256sum`) and run it on these workflows first.
+        # Each problem prints as an ::error annotation on its file and line
+        # (GitHub shows up to 10 per step; the log has them all). The
+        # template escapes what workflow commands treat as special: % in
+        # the message, and % , : in the file name.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        env:
+          IMAGE: docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        run: |
+          docker pull -q "$IMAGE" \
+            || { echo "::error::Couldn't pull the actionlint image (Docker Hub down or rate-limited?). This isn't a lint failure: re-run the job, and if it fails again, check the IMAGE digest in ci.yml's 'Workflows pass actionlint' step."; exit 1; }
+          docker run --rm --network=none -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo "$IMAGE" \
+            -format '{{range $err := .}}::error file={{replace $err.Filepath "%" "%25" "," "%2C" ":" "%3A"}},line={{$err.Line}},col={{$err.Column}}::{{replace $err.Message "%" "%25"}} [{{$err.Kind}}]\n{{end}}'
