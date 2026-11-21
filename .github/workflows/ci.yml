@@ -115,14 +115,15 @@ jobs:
         # bun.lock, and its only complaint must be the platform SDK tarball
         # (a file: dependency that exists only inside a Muse Space). A bun
         # too old for the lockfile (#22), or a package.json change without a
-        # re-lock, fails with bun's own output. Installs only bun's platform
-        # package, from npm.
+        # re-lock, fails with bun's own output. The step installs bun's
+        # platform package from npm, and `bun install` then downloads and
+        # verifies every registry package the lock names (about 130 MB).
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         timeout-minutes: 5
         run: |
           set -euo pipefail
-          BUN_VERSION=$(jq -r '.packageManager // "" | ltrimstr("bun@")' package.json)
-          [ -n "$BUN_VERSION" ] || { echo "::error file=package.json::package.json has no packageManager naming a bun"; exit 1; }
+          BUN_VERSION=$(jq -r '.packageManager // "" | select(startswith("bun@")) | ltrimstr("bun@") | sub("\\+.*$"; "")' package.json)
+          [ -n "$BUN_VERSION" ] || { echo "::error file=package.json::package.json's packageManager doesn't name a bun (bun@<version>)"; exit 1; }
           case "$(uname -m)" in
             x86_64) ARCH=x64 ;;
             aarch64) ARCH=aarch64 ;;
@@ -148,7 +149,8 @@ jobs:
         timeout-minutes: 5
         run: |
           set -euo pipefail
-          BUN_VERSION=$(jq -r '.packageManager | ltrimstr("bun@")' package.json)
+          BUN_VERSION=$(jq -r '.packageManager // "" | select(startswith("bun@")) | ltrimstr("bun@") | sub("\\+.*$"; "")' package.json)
+          [ -n "$BUN_VERSION" ] || { echo "::error file=package.json::package.json's packageManager doesn't name a bun (bun@<version>)"; exit 1; }
           ZOD_VERSION=$(jq -r '.dependencies.zod' package.json)
           DRIZZLE_VERSION=$(jq -r '.dependencies["drizzle-orm"]' package.json)
           DEPS="$RUNNER_TEMP/test-deps"
