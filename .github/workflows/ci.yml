@@ -18,10 +18,12 @@ jobs:
   # NOTE: pr-labels.yml and pr-labels-ci.yml find this workflow by its name
   # ("CI") and file (ci.yml). If either is renamed, update them too.
   #
-  # What CI can't do: install dependencies, typecheck or build. The Muse
-  # Space SDK (@hatch/space-sdk in package.json) is a local file dependency
-  # that exists only inside a Muse Space, so `bun run typecheck` and
-  # `bun run build` run there. These checks need nothing from it.
+  # What CI can't do: install the project's dependencies, typecheck or
+  # build. The Muse Space SDK (@hatch/space-sdk in package.json) is a local
+  # file dependency that exists only inside a Muse Space, so `bun install`,
+  # `bun run typecheck` and `bun run build` run there. These checks need
+  # nothing from it: the behavior tests install just the packages they use
+  # and replace the SDK with a stub (server/test/sdk-stub.ts).
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -96,6 +98,37 @@ jobs:
             | grep -zE '\.([cm]?[jt]sx?)$')
           NODE_PATH="$RUNNER_TEMP/ts/node_modules" node .github/scripts/check-doc-quotes.mjs \
             --docs "${docs[@]}" --src "${src[@]}"
+      - name: Actions behave as tested
+        # server/test: each action in server/src/actions.ts against a local
+        # fake of the store (server/test/fake-store.ts), with a real drizzle
+        # on bun:sqlite set up by the drizzle/ migrations, and the Space SDK
+        # replaced by server/test/sdk-stub.ts. Installs only what the tests
+        # use, at the versions package.json pins: bun (its packageManager),
+        # zod and drizzle-orm.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          BUN_VERSION=$(jq -r '.packageManager | ltrimstr("bun@")' package.json)
+          ZOD_VERSION=$(jq -r '.dependencies.zod' package.json)
+          DRIZZLE_VERSION=$(jq -r '.dependencies["drizzle-orm"]' package.json)
+          DEPS="$RUNNER_TEMP/test-deps"
+          npm install --prefix "$DEPS" --no-save --ignore-scripts --no-audit --no-fund \
+            "bun@$BUN_VERSION" "zod@$ZOD_VERSION" "drizzle-orm@$DRIZZLE_VERSION"
+          # With --ignore-scripts, bun's npm package doesn't link its binary
+          # (its postinstall does that); the platform package holds it.
+          case "$(uname -m)" in
+            x86_64) ARCH=x64 ;;
+            aarch64) ARCH=aarch64 ;;
+            *) echo "::error::no bun build for $(uname -m)"; exit 1 ;;
+          esac
+          BUN="$DEPS/node_modules/@oven/bun-linux-$ARCH/bin/bun"
+          # actions.ts imports zod and drizzle-orm by name, so they go in the
+          # repo's node_modules (gitignored), where bun resolves them.
+          mkdir -p node_modules
+          cp -R "$DEPS/node_modules/zod" "$DEPS/node_modules/drizzle-orm" node_modules/
+          "$BUN" --version
+          "$BUN" test server/test
       - name: Workflows pass actionlint
         # actionlint's own image, pinned by digest (the multi-arch index for
         # tag 1.7.12). It bundles ShellCheck 0.11.0, so run: scripts are
