@@ -11,22 +11,26 @@
 //   `Authorization: Bearer`) don't, and aren't checked.
 // - The code's strings are the string literals, template literals and JSX
 //   text in the given source files, parsed with TypeScript. In a template,
-//   each `${...}` matches a value: any text without a `"` that doesn't start
-//   or end with whitespace. So a doc can quote a message with a value filled
-//   in (`Stored 15 characters under "setup-check".`) or with a placeholder
-//   (`Fetched … characters.`). JSX text is joined across its {expressions},
-//   which match the same way. Its whitespace is first trimmed as JSX does
-//   (whitespace that contains a line break, at the start or end of a text
-//   run, is dropped), then collapsed, as a browser shows it.
+//   each `${...}` matches one value: a token with no whitespace and no `"`,
+//   or, between the code's own double quotes, any text without a `"`. So a
+//   doc can quote a message with a value filled in (`Stored 15 characters
+//   under "setup-check".`) or with a placeholder (`Fetched … characters.`),
+//   but not with a word the code dropped. JSX text is joined across its
+//   {expressions}, which match the same way (a string literal such as {" "}
+//   is text). Its whitespace is first trimmed as JSX does (whitespace that
+//   contains a line break, at the start or end of a text run, is dropped),
+//   its HTML entities decoded, and then collapsed, as a browser shows it.
 // - A quote must match one string in full.
-// - Code spans are read as CommonMark does: a run of any number of
-//   backticks opens one, and a span can continue across the lines of a
-//   paragraph (each line break reads as a space). Each table row is read on
-//   its own.
+// - Code spans are read close to CommonMark: a run of any number of
+//   backticks opens one (not after a backslash), and a span can continue
+//   across the lines of a paragraph (each line break reads as a space). A
+//   blank line, a list item, a heading or a table row starts a new block.
 // - Not read: inline code in fenced code blocks, and HTML (<code>). A fence
 //   is recognized only with at most 3 spaces of indentation and outside a
 //   blockquote; inline code in a fence indented further (in a list item) or
-//   in a blockquote is read as prose. The docs have none of either today.
+//   in a blockquote is read as prose. A list item's lazy continuation, an
+//   escaped backslash before a backtick, and other rare forms may be read
+//   differently from GitHub. The docs have none of these today.
 //
 // Usage: node check-doc-quotes.mjs --docs <doc.md>... --src <file>...
 // Needs the typescript package resolvable (NODE_PATH or a local install).
@@ -83,13 +87,34 @@ const BREAK = "\u0001"; // where a child element splits a JSX element's text
 
 // Turn a string with ANY markers into a regex that must match a quote in full.
 function toRegex(s) {
-  const parts = s.split(ANY).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  // A placeholder matches a value: text without a double quote, so a quote
-  // that shows the code's own quotes around a value fails if the code drops
-  // them, and without whitespace at either end, so a space the code doesn't
-  // write next to a value can't be absorbed into it.
-  return new RegExp(`^${parts.join('[^"\\s](?:[^"]*[^"\\s])?')}$`, "s");
+  // Adjacent placeholders (`${a}${b}`, `{a}{b}`) are one value: as separate
+  // groups they'd backtrack exponentially on a long quote that doesn't match.
+  const raw = s.replace(new RegExp(`${ANY}+`, "g"), ANY).split(ANY);
+  const esc = (p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // A placeholder matches one value, never a run of words, so a word dropped
+  // from the code next to a ${...} is caught. A value is one token: no
+  // whitespace and no double quote. Between the code's own double quotes
+  // (`under "${label}"`) it is anything without a double quote, so a doc can
+  // show a label with spaces (`"<your label>"`). Either way a quote that
+  // shows the code's quotes around a value fails if the code drops them.
+  let out = esc(raw[0]);
+  for (let i = 1; i < raw.length; i++) {
+    const quoted = raw[i - 1].endsWith('"') && raw[i].startsWith('"');
+    out += (quoted ? '[^"]+' : '[^"\\s]+') + esc(raw[i]);
+  }
+  return new RegExp(`^${out}$`, "s");
 }
+
+// The HTML entities JSX text decodes, for the ones a message might use.
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
+const decodeEntities = (t) =>
+  t.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (m, e) => {
+    if (e[0] === "#") {
+      const n = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(n) && n <= 0x10ffff ? String.fromCodePoint(n) : m;
+    }
+    return ENTITIES[e.toLowerCase()] ?? m;
+  });
 
 // JSX text as React renders it: lines are trimmed where they meet a line
 // break, whitespace-only lines dropped, and the rest joined with a space
@@ -131,7 +156,13 @@ function codeStrings(files) {
         // An element's text children, joined across {expressions}.
         let joined = "";
         for (const c of node.children) {
-          if (ts.isJsxText(c)) joined += jsxText(c.text);
+          if (ts.isJsxText(c)) joined += decodeEntities(jsxText(c.text));
+          else if (
+            ts.isJsxExpression(c) &&
+            c.expression &&
+            (ts.isStringLiteral(c.expression) || ts.isNoSubstitutionTemplateLiteral(c.expression))
+          )
+            joined += c.expression.text; // {" "} and the like are text
           else if (ts.isJsxExpression(c) && c.expression) joined += ANY;
           else joined += BREAK; // a child element breaks the text
         }
@@ -148,8 +179,10 @@ function codeStrings(files) {
 }
 
 // A code span: a backtick run, then text up to a run of the same length
-// (CommonMark's rule; the text can't start or end inside a longer run).
-const CODE_SPAN = /(?<!`)(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+// (CommonMark's rule; the text can't start or end inside a longer run). A
+// backslash before the opening run escapes it.
+const CODE_SPAN = /(?<![`\\])(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+const LIST_ITEM = /^\s*([-*+]|\d{1,9}[.)])(\s|$)/;
 
 // Inline code spans outside fenced code blocks, with the line each starts on.
 function docQuotes(file) {
@@ -181,12 +214,17 @@ function docQuotes(file) {
     if (f) {
       flush();
       if (fence === null) fence = f[1];
-      else if (f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+      // A closing fence has nothing after its run (no info string).
+      else if (f[1][0] === fence[0] && f[1].length >= fence.length && !line.slice(f[0].length).trim())
+        fence = null;
       return;
     }
     if (fence !== null) return;
     if (!line.trim()) {
       flush(); // a blank line ends the paragraph
+    } else if (LIST_ITEM.test(line)) {
+      flush(); // a new list item starts a new paragraph
+      para.push({ text: line, line: i + 1 });
     } else if (/^ {0,3}(#|\|)/.test(line)) {
       // A heading or a table row is a block of its own line.
       flush();
