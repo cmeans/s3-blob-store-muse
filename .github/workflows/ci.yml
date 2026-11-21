@@ -100,9 +100,11 @@ jobs:
             --docs "${docs[@]}" --src "${src[@]}"
       - name: Drizzle journal matches the migrations
         # drizzle/meta/_journal.json lists every drizzle/*.sql, once, with
-        # idx 0..n-1 and each `when` later than the last: the migrator skips
-        # a file the journal doesn't list, or an entry that isn't later,
-        # without a word.
+        # idx 0..n-1 and each `when` later than the one before (from the
+        # third entry on; the first two share one, from the live Space): the
+        # migrator skips a file the journal doesn't list, or an entry that
+        # isn't later, without a word. It can't tell an edited migration
+        # from the original.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash .github/scripts/check-drizzle-journal.sh drizzle
       - name: Server tests pass

@@ -21,13 +21,25 @@
 set -uo pipefail
 
 [ $# -eq 1 ] || { echo "usage: check-drizzle-journal.sh <drizzle folder>" >&2; exit 2; }
+command -v jq > /dev/null || { echo "::error::check-drizzle-journal.sh needs jq, and it isn't on PATH"; exit 2; }
 d=$1
 j=$d/meta/_journal.json
 fail=0
 err() { echo "::error file=$1::$2"; fail=1; }
 
+if [ ! -f "$j" ]; then
+  err "$j" "$j doesn't exist"
+  exit 1
+fi
 if ! jq -e '.entries | type == "array"' "$j" > /dev/null 2>&1; then
-  err "$j" "$j is missing, isn't JSON, or has no entries array"
+  err "$j" "$j isn't JSON, or has no entries array"
+  exit 1
+fi
+
+# Every entry has a string tag; the set comparison below needs them.
+bad_tags=$(jq -r '[.entries | to_entries[] | select((.value.tag | type) != "string") | .key] | join(", ")' "$j")
+if [ -n "$bad_tags" ]; then
+  err "$j" "journal entries at positions $bad_tags have no tag, or a tag that isn't a string"
   exit 1
 fi
 
@@ -51,8 +63,8 @@ jq -e '[.entries[].idx] == [range(0; .entries | length)]' "$j" > /dev/null \
 
 # when: a number on every entry, never decreasing, strictly later from the
 # third entry on.
-jq -e 'all(.entries[]; .when | type == "number")' "$j" > /dev/null \
-  || err "$j" "a journal entry's when is missing or not a number"
+bad_when=$(jq -r '[.entries[] | select((.when | type) != "number") | .tag] | join(", ")' "$j")
+[ -z "$bad_when" ] || err "$j" "journal entries with no when, or a when that isn't a number: $bad_when"
 while read -r line; do
   [ -n "$line" ] && err "$j" "$line"
 done < <(jq -r '.entries as $e | range(1; $e | length) as $i

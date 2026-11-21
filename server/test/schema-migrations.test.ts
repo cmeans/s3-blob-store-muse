@@ -4,7 +4,8 @@
 // migrator, then compares what it built with what schema.ts declares:
 // - the same tables, and no others;
 // - in each, the same columns, with the same SQL type, NOT NULL, primary
-//   key, AUTOINCREMENT and SQL default;
+//   key (composite ones included), AUTOINCREMENT and SQL default (a value
+//   as the driver stores it, or a sql`` expression's text);
 // - the same indexes (by columns and uniqueness; unique() columns and
 //   unique constraints count as unique indexes, as SQLite builds them), the
 //   same foreign keys (columns, target table and columns, ON DELETE and ON
@@ -22,11 +23,16 @@ import { expect, test } from "bun:test";
 import { is } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
+import { getTableConfig, SQLiteSyncDialect, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { fileURLToPath } from "node:url";
 import * as schema from "../src/schema";
 
 const MIGRATIONS = fileURLToPath(new URL("../../drizzle", import.meta.url));
+const dialect = new SQLiteSyncDialect();
+
+// SQLite reports a default expression without its outer parentheses:
+// DEFAULT (unixepoch()) comes back as unixepoch().
+const stripParens = (s: string) => (/^\(.*\)$/s.test(s) ? s.slice(1, -1) : s);
 
 type Column = {
   type: string;
@@ -47,7 +53,7 @@ type Shape = {
 
 const fkAction = (a: string | undefined) => (a ?? "no action").toLowerCase();
 
-/** What schema.ts declares, table by table. */
+/** The indexes, foreign keys and named checks schema.ts declares, table by table. */
 function declaredShapes(): Record<string, Shape> {
   const out: Record<string, Shape> = {};
   for (const value of Object.values(schema)) {
@@ -75,27 +81,28 @@ function declaredShapes(): Record<string, Shape> {
   return out;
 }
 
-/** What schema.ts declares, table by table. */
+/** The columns schema.ts declares, table by table. */
 function declared(): Record<string, Record<string, Column>> {
   const out: Record<string, Record<string, Column>> = {};
   for (const value of Object.values(schema)) {
     if (!is(value, SQLiteTable)) continue;
     const config = getTableConfig(value);
+    // A composite primaryKey() leaves each column's `primary` false.
+    const inCompositeKey = (name: string) => config.primaryKeys.some((pk) => pk.columns.some((k) => k.name === name));
     const columns: Record<string, Column> = {};
     for (const c of config.columns) {
-      const sqlDefault =
-        c.default === undefined || typeof c.default === "function"
-          ? null
-          : typeof c.default === "object" && c.default !== null && "queryChunks" in c.default
-            ? "(sql)" // a sql`` default: compared only as present
-            : String(c.default);
+      let sqlDefault: string | null = null;
+      if (c.default !== undefined && typeof c.default !== "function") {
+        sqlDefault =
+          typeof c.default === "object" && c.default !== null && "queryChunks" in c.default
+            ? stripParens(dialect.sqlToQuery(c.default as never).sql) // a sql`` default
+            : String(c.mapToDriverValue(c.default)); // a value, as the driver stores it
+      }
+      const type = c.getSQLType().toUpperCase();
       columns[c.name] = {
-        type: c.getSQLType().toUpperCase(),
-        // SQLite's table_info reports a primary key column as nullable
-        // unless NOT NULL is written; drizzle marks it notNull. Compare
-        // NOT NULL on the other columns only.
-        notNull: c.primary ? false : c.notNull,
-        primaryKey: c.primary,
+        type,
+        notNull: rowidAlias(c.primary, type) ? true : c.notNull,
+        primaryKey: c.primary || inCompositeKey(c.name),
         autoIncrement: (c as { autoIncrement?: boolean }).autoIncrement === true,
         default: sqlDefault,
       };
@@ -103,6 +110,23 @@ function declared(): Record<string, Record<string, Column>> {
     out[config.name] = columns;
   }
   return out;
+}
+
+// A single-column INTEGER PRIMARY KEY is the rowid and can't hold NULL,
+// though table_info reports it nullable when NOT NULL isn't written. Any
+// other primary key column can hold NULL in SQLite unless NOT NULL is
+// written, so NOT NULL is compared as written there.
+function rowidAlias(singlePrimaryKey: boolean, type: string): boolean {
+  return singlePrimaryKey && type === "INTEGER";
+}
+
+/** The migrated database's own tables: not SQLite's, not drizzle's journal. */
+function tablesOf(sqlite: Database): { name: string; sql: string }[] {
+  return sqlite
+    .query(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name != '__drizzle_migrations'",
+    )
+    .all() as { name: string; sql: string }[];
 }
 
 /** A fresh database with every migration applied. */
@@ -117,13 +141,8 @@ const quoteId = (name: string) => `"${name.replace(/"/g, '""')}"`;
 /** The indexes, foreign keys and named checks the migrations built. */
 function builtShapes(): Record<string, Shape> {
   const sqlite = migrated();
-  const tables = sqlite
-    .query(
-      "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != '__drizzle_migrations'",
-    )
-    .all() as { name: string; sql: string }[];
   const out: Record<string, Shape> = {};
-  for (const t of tables) {
+  for (const t of tablesOf(sqlite)) {
     const indexes: string[] = [];
     const list = sqlite.query(`PRAGMA index_list(${quoteId(t.name)})`).all() as {
       name: string;
@@ -149,23 +168,20 @@ function builtShapes(): Record<string, Shape> {
       const first = rows[0]!;
       return `${rows.map((r) => r.from).join(",")} -> ${first.table}(${rows.map((r) => r.to).join(",")}) delete:${first.on_delete.toLowerCase()} update:${first.on_update.toLowerCase()}`;
     });
-    const checks = [...t.sql.matchAll(/CONSTRAINT\s+["`]?([^"`\s]+)["`]?\s+CHECK\b/gi)].map((m) => m[1]!);
+    const checks = [...t.sql.matchAll(/CONSTRAINT\s+(?:"((?:[^"]|"")+)"|`([^`]+)`|\[([^\]]+)\]|(\w+))\s+CHECK\b/gi)].map(
+      (m) => (m[1]?.replace(/""/g, '"') ?? m[2] ?? m[3] ?? m[4])!,
+    );
     out[t.name] = { indexes: indexes.sort(), foreignKeys: foreignKeys.sort(), checks: checks.sort() };
   }
   sqlite.close();
   return out;
 }
 
-/** What the migrations built, table by table. */
+/** The columns the migrations built, table by table. */
 function built(): Record<string, Record<string, Column>> {
   const sqlite = migrated();
-  const tables = sqlite
-    .query(
-      "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != '__drizzle_migrations'",
-    )
-    .all() as { name: string; sql: string }[];
   const out: Record<string, Record<string, Column>> = {};
-  for (const t of tables) {
+  for (const t of tablesOf(sqlite)) {
     const info = sqlite.query(`PRAGMA table_info(${quoteId(t.name)})`).all() as {
       name: string;
       type: string;
@@ -174,16 +190,18 @@ function built(): Record<string, Record<string, Column>> {
       pk: number;
     }[];
     const autoIncrement = /\bAUTOINCREMENT\b/i.test(t.sql);
+    const singleKey = info.filter((c) => c.pk > 0).length === 1;
     const columns: Record<string, Column> = {};
     for (const c of info) {
+      const type = c.type.toUpperCase();
       columns[c.name] = {
-        type: c.type.toUpperCase(),
-        notNull: c.pk > 0 ? false : c.notnull === 1,
+        type,
+        notNull: rowidAlias(singleKey && c.pk > 0, type) ? true : c.notnull === 1,
         primaryKey: c.pk > 0,
         // SQLite allows AUTOINCREMENT only on an INTEGER PRIMARY KEY, so a
         // table's keyword belongs to its primary key column.
         autoIncrement: autoIncrement && c.pk > 0,
-        default: c.dflt_value === null ? null : c.dflt_value.startsWith("(") ? "(sql)" : unquote(c.dflt_value),
+        default: c.dflt_value === null ? null : unquote(c.dflt_value),
       };
     }
     out[t.name] = columns;

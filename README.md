@@ -78,9 +78,11 @@ token as an `Authorization: Bearer` header and calls the store.
   error on a console that already has a database. Never edit a
   migration that has been applied: add a new one. (Entries 0 and 1
   share a `when`, from the live Space, which is fine for them only.)
-  CI checks both rules: the journal against the `.sql` files, and the
-  tables the migrations build against `schema.ts` (columns, types and
-  constraints), so a schema change without its migration fails.
+  CI checks the journal against the `.sql` files (every file listed,
+  in order, each `when` later), and the tables the migrations build
+  against `schema.ts` (columns, types and constraints), so a schema
+  change without its migration fails. It can't tell an edited
+  migration that has already been applied: that rule is yours to keep.
 - `space.json`: the Space's manifest, written by Muse's builder.
 
 A label is up to 128 letters, digits, dots, dashes and underscores,
