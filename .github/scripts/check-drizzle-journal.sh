@@ -38,10 +38,10 @@ for f in "$d"/*.sql; do sql+=("$(basename "$f" .sql)"); done
 mapfile -t tags < <(jq -r '.entries[].tag' "$j")
 while read -r t; do
   [ -n "$t" ] && err "$d/$t.sql" "$t.sql has no journal entry, so the migrator never applies it: add it to $j"
-done < <(comm -13 <(printf '%s\n' "${tags[@]}" | sort) <(printf '%s\n' "${sql[@]}" | sort))
+done < <(comm -13 <(printf '%s\n' "${tags[@]}" | sort -u) <(printf '%s\n' "${sql[@]}" | sort -u))
 while read -r t; do
   [ -n "$t" ] && err "$j" "journal entry $t has no $t.sql in $d"
-done < <(comm -23 <(printf '%s\n' "${tags[@]}" | sort) <(printf '%s\n' "${sql[@]}" | sort))
+done < <(comm -23 <(printf '%s\n' "${tags[@]}" | sort -u) <(printf '%s\n' "${sql[@]}" | sort -u))
 dups=$(printf '%s\n' "${tags[@]}" | sort | uniq -d)
 [ -z "$dups" ] || err "$j" "journal tags listed more than once: $(echo "$dups" | paste -sd, -)"
 
