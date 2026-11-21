@@ -5,16 +5,20 @@
 // Space SDK: @hatch/space-sdk is replaced by ./sdk-stub.ts. CI's step
 // "Actions behave as tested" installs exactly those two and runs this.
 //
-// - The database is real: drizzle-orm on an in-memory bun:sqlite, set up by
-//   drizzle's own migrator from this repo's drizzle/ folder, as a Space does.
+// - The database is real SQL: drizzle-orm on an in-memory bun:sqlite, set up
+//   by drizzle's own migrator from this repo's drizzle/ folder. The Space's
+//   own driver isn't known here (the SDK peer-depends on @libsql/client, so
+//   it may be libsql), so driver-specific behavior isn't covered.
 // - The store is ./fake-store.ts, a local HTTP fake of the store's contract.
 // - Each call validates the request with the action's zod schema, runs the
-//   handler, and validates the response, as the Space runtime does around a
-//   handler. A refused request never reaches the handler.
+//   handler, and validates the response. That the Space runtime does the
+//   same around a handler is assumed, not verified. A refused request never
+//   reaches the handler.
 //
 // What these can't check: the real SDK's types and runtime (Muse's typecheck
-// on code PRs covers the types), and the real store (the fake follows its
-// handler as of the commit fake-store.ts names).
+// on code PRs covers the types), the real store (the fake follows its
+// handler as of the commit fake-store.ts names), and the 30 s timeout on
+// store calls.
 
 import { Database } from "bun:sqlite";
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
@@ -60,6 +64,7 @@ beforeEach(() => {
   store.blobs.clear();
   store.requests.length = 0;
   store.answer = null;
+  store.location = null;
 });
 
 /** Validate the request, run the handler, validate the response. */
@@ -122,6 +127,14 @@ describe("saveConfig and getConfigState", () => {
   ])("refuses %j", (args, message) => {
     expect(refusal("saveConfig", args)).toContain(message);
   });
+
+  test("length limits: URL 2048, token 4096", () => {
+    const url = (n: number) => "https://a.example/" + "p".repeat(n - "https://a.example/".length);
+    expect(refusal("saveConfig", { functionUrl: url(2048), token: "t" })).toBeNull();
+    expect(refusal("saveConfig", { functionUrl: url(2049), token: "t" })).not.toBeNull();
+    expect(refusal("saveConfig", { functionUrl: url(20), token: "t".repeat(4096) })).toBeNull();
+    expect(refusal("saveConfig", { functionUrl: url(20), token: "t".repeat(4097) })).not.toBeNull();
+  });
 });
 
 describe("testConnection", () => {
@@ -141,13 +154,38 @@ describe("testConnection", () => {
       httpStatus: 200,
       message: "Connected — the store answered ok and accepted the token.",
     });
-    expect(store.requests).toEqual([{ method: "GET", path: "/" }]);
+    expect(store.requests).toEqual([{ method: "GET", path: "/", auth: true }]);
   });
 
-  test("a trailing slash on the URL is tolerated", async () => {
-    await configure(`${store.url}//`);
-    expect((await call("testConnection")).status).toBe("ok");
-    expect(store.requests).toEqual([{ method: "GET", path: "/" }]);
+  test("trailing slashes on the URL are stripped before the path is added", async () => {
+    // Watch the URL actions.ts passes to fetch: bun's fetch itself sends
+    // "//" as "/", so the store's view alone wouldn't show the stripping.
+    const urls: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      urls.push(String(input));
+      return realFetch(input, init);
+    }) as typeof fetch;
+    try {
+      await configure(`${store.url}//`);
+      expect((await call("testConnection")).status).toBe("ok");
+      await call("fetchBlob", { label: "a" });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(urls).toEqual([`${store.url}/`, `${store.url}/blobs/a`]);
+  });
+
+  test("a redirect isn't followed, so the token goes nowhere else", async () => {
+    await configure();
+    store.answer = 302;
+    store.location = `${store.url}/elsewhere`;
+    expect(await call("testConnection")).toEqual({
+      status: "error",
+      httpStatus: 302,
+      message: "Unexpected answer from the store (HTTP 302).",
+    });
+    expect(store.requests).toEqual([{ method: "GET", path: "/", auth: true }]);
   });
 
   test("401: the store rejected the token", async () => {
@@ -316,6 +354,27 @@ describe("storeBlob, fetchBlob, deleteBlob", () => {
       expect(history()).toEqual([]);
     });
 
+    test(`${name}: a 2xx other than 200 isn't success`, async () => {
+      await configure();
+      store.answer = 204;
+      expect(await call(name, args)).toEqual({
+        [okKey]: false,
+        ...extra,
+        status: 204,
+        message: `${failed} (HTTP 204).`,
+      });
+      expect(history()).toEqual([]);
+    });
+
+    test(`${name}: a redirect isn't followed`, async () => {
+      await configure();
+      store.answer = 302;
+      store.location = `${store.url}/elsewhere`;
+      expect((await call(name, args)).status).toBe(302);
+      expect(store.requests).toHaveLength(1);
+      expect(history()).toEqual([]);
+    });
+
     test(`${name}: unreachable`, async () => {
       await configure(deadUrl());
       expect(await call(name, args)).toEqual({
@@ -328,6 +387,17 @@ describe("storeBlob, fetchBlob, deleteBlob", () => {
       expect(invalidations).toBe(0);
     });
   }
+
+  test("the store refuses a body with U+FFFD; the console reports its 400", async () => {
+    await configure();
+    expect(await call("storeBlob", { label: "u", content: "a�b" })).toEqual({
+      ok: false,
+      status: 400,
+      message: "Store failed (HTTP 400).",
+    });
+    expect(store.blobs.has("u")).toBe(false);
+    expect(history()).toEqual([]);
+  });
 
   test("content over 5,000,000 characters is refused before the store", () => {
     expect(refusal("storeBlob", { label: "a", content: "x".repeat(5_000_001) })).toEqual([
@@ -393,12 +463,18 @@ describe("labels follow the store's rule", () => {
     ]);
   });
 
-  test("a refused label never reaches the store", async () => {
+  test("a refused label is refused by every action that takes one, before the handler", async () => {
     await configure();
-    for (const name of ["fetchBlob", "deleteBlob", "registerExternalOperation"] as const) {
-      expect(() => (Actions[name] as unknown as Action).request.parse({ label: "..", action: "stored" })).toThrow();
+    for (const [name, args] of [
+      ["fetchBlob", { label: ".." }],
+      ["storeBlob", { label: "..", content: "x" }],
+      ["deleteBlob", { label: ".." }],
+      ["registerExternalOperation", { label: "..", action: "stored" }],
+    ] as const) {
+      await expect(call(name, args)).rejects.toThrow();
     }
     expect(store.requests).toEqual([]);
+    expect(history()).toEqual([]);
   });
 });
 
