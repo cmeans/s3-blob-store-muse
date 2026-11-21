@@ -17,20 +17,30 @@
 //   under "setup-check".`) or with a placeholder (`Fetched … characters.`),
 //   but not with a word the code dropped. JSX text is joined across its
 //   {expressions}, which match the same way (a string literal such as {" "}
-//   is text). Its whitespace is first trimmed as JSX does (whitespace that
-//   contains a line break, at the start or end of a text run, is dropped),
-//   its HTML entities decoded, and then collapsed, as a browser shows it.
+//   is text), but a child element ends a text run: <p>Click <b>Save</b>
+//   now.</p> gives "Click", "Save" and "now.", so a doc can't quote that
+//   sentence whole. Its whitespace is first trimmed as JSX does (whitespace
+//   that contains a line break, at the start or end of a text run, is
+//   dropped), its HTML entities decoded, and then collapsed, as a browser
+//   shows it.
 // - A quote must match one string in full.
 // - Code spans are read close to CommonMark: a run of any number of
 //   backticks opens one (not after a backslash), and a span can continue
 //   across the lines of a paragraph (each line break reads as a space). A
 //   blank line, a list item, a heading or a table row starts a new block.
-// - Not read: inline code in fenced code blocks, and HTML (<code>). A fence
-//   is recognized only with at most 3 spaces of indentation and outside a
-//   blockquote; inline code in a fence indented further (in a list item) or
-//   in a blockquote is read as prose. A list item's lazy continuation, an
-//   escaped backslash before a backtick, and other rare forms may be read
+// - Not read: inline code in fenced code blocks, and HTML tags (<code>).
+//   Read as prose, though GitHub doesn't show them: code spans inside HTML
+//   comments. A fence is recognized only with at most 3 spaces of
+//   indentation and outside a blockquote; inline code in a fence indented
+//   further (in a list item) or in a blockquote is read as prose. A list
+//   item's lazy continuation, a table row without a leading |, an escaped
+//   backslash before a backtick, and other rare forms may be read
 //   differently from GitHub. The docs have none of these today.
+// - CI passes every tracked .md file, so a doc that quotes a retired message
+//   on purpose (a changelog) would need to leave it out of inline code.
+// - Placeholders separated only by short literals (${a}-${b}-${c}-...) make
+//   the regex slow on a long quote that doesn't match: about 6 s at 80
+//   segments. No message in the code has that shape.
 //
 // Usage: node check-doc-quotes.mjs --docs <doc.md>... --src <file>...
 // Needs the typescript package resolvable (NODE_PATH or a local install).
@@ -210,7 +220,11 @@ function docQuotes(file) {
     para = [];
   };
   lines.forEach((line, i) => {
-    const f = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    let f = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    // A backtick run with another backtick after it on the line is inline
+    // code (```x``` is how you write it.), not a fence: CommonMark allows no
+    // backtick in a backtick fence's info string.
+    if (f && fence === null && f[1][0] === "`" && line.slice(f[0].length).includes("`")) f = null;
     if (f) {
       flush();
       if (fence === null) fence = f[1];
@@ -225,7 +239,7 @@ function docQuotes(file) {
     } else if (LIST_ITEM.test(line)) {
       flush(); // a new list item starts a new paragraph
       para.push({ text: line, line: i + 1 });
-    } else if (/^ {0,3}(#|\|)/.test(line)) {
+    } else if (/^ {0,3}(#{1,6}(\s|$)|\|)/.test(line)) {
       // A heading or a table row is a block of its own line.
       flush();
       para.push({ text: line, line: i + 1 });
