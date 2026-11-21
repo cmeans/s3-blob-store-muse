@@ -39,7 +39,7 @@ fi
 # Every entry has a string tag; the set comparison below needs them.
 bad_tags=$(jq -r '[.entries | to_entries[] | select((.value.tag | type) != "string") | .key] | join(", ")' "$j")
 if [ -n "$bad_tags" ]; then
-  err "$j" "journal entries at positions $bad_tags have no tag, or a tag that isn't a string"
+  err "$j" "journal entries with no tag, or a tag that isn't a string, at position (counting from 0): $bad_tags"
   exit 1
 fi
 
