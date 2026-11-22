@@ -83,7 +83,7 @@ export function startFakeStore(token = "test-token"): FakeStore {
       if (req.method === "PUT") {
         const body = await req.text();
         // U+FFFD: a text body's non-UTF-8 bytes arrive replaced by it.
-        if (body.includes("�")) return reply(400, "body must be UTF-8 text (U+FFFD not allowed)");
+        if (body.includes("\ufffd")) return reply(400, "body must be UTF-8 text (U+FFFD not allowed)");
         store.blobs.set(label, body);
         return reply(200, "stored");
       }

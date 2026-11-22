@@ -8,9 +8,11 @@
 # ~/.bun cache can't hide a bad integrity hash. bun downloads and verifies
 # every registry package in the lock (about 130 MB, from npm). A full
 # install can't pass outside a Muse Space: @hatch/space-sdk is a file:
-# tarball that exists only there. So the check passes only when bun's one
-# complaint is that tarball, exactly:
+# tarball that exists only there. So outside one, the check passes only when
+# bun's one complaint is that tarball, exactly:
 #   error: ENOENT extracting tarball from @hatch/space-sdk
+# On a Muse platform host, where the tarball exists, a frozen install that
+# succeeds with no error passes too.
 # What it can't check: the lock's own entry for @hatch/space-sdk (its
 # integrity and its dependencies), which needs the tarball. And it compares
 # the pin with the lock, not with the platform's own bun, which CI can't
@@ -50,8 +52,16 @@ if [ -f "$root/bunfig.toml" ]; then cp "$root/bunfig.toml" "$work/" || exit 2; f
 # FORCE_COLOR would color bun's output (NO_COLOR doesn't undo it), and the
 # comparison below is on the plain text.
 out=$(cd "$work" && env -u FORCE_COLOR "$bun" install --frozen-lockfile --ignore-scripts 2>&1)
+rc=$?
 # bun's first line is its banner ("bun install v1.4.4 (...)").
 rest=$(printf '%s\n' "$out" | sed '1{/^bun install v/d;}')
+
+# Where the SDK tarball exists (on a Muse platform host), the frozen install
+# succeeds outright: the lock is current, the SDK entry included.
+if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -q '^error:'; then
+  echo "bun $have installed everything from bun.lock, the platform SDK included: the lock is current for package.json"
+  exit 0
+fi
 
 expected="error: ENOENT extracting tarball from @hatch/space-sdk"
 if [ "$rest" = "$expected" ]; then

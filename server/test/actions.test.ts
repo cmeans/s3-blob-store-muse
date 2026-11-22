@@ -11,8 +11,10 @@
 //   it may be libsql), so driver-specific behavior isn't covered.
 // - The store is ./fake-store.ts, a local HTTP fake of the store's contract.
 // - Each call validates the request with the action's zod schema, runs the
-//   handler, and validates the response. That the Space runtime does the
-//   same around a handler is assumed, not verified. A refused request never
+//   handler, and validates the response. The Space runtime does the same:
+//   Muse read its worker bundle (review of #38), which runs
+//   definition.request.parse(args), calls the handler with the parsed args,
+//   then runs definition.response.parse(result). A refused request never
 //   reaches the handler.
 //
 // What these can't check: the real SDK's types and runtime (Muse's typecheck
@@ -390,7 +392,7 @@ describe("storeBlob, fetchBlob, deleteBlob", () => {
 
   test("the store refuses a body with U+FFFD; the console reports its 400", async () => {
     await configure();
-    expect(await call("storeBlob", { label: "u", content: "a�b" })).toEqual({
+    expect(await call("storeBlob", { label: "u", content: "a\ufffdb" })).toEqual({
       ok: false,
       status: 400,
       message: "Store failed (HTTP 400).",
@@ -505,6 +507,19 @@ describe("listHistory and registerExternalOperation", () => {
     for (const e of all.entries) expect(new Date(e.created_at).toISOString()).toBe(e.created_at);
     const two = await call("listHistory", { limit: 2 });
     expect(two.entries.map((e: { label: string }) => e.label)).toEqual(["l4", "l3"]);
+  });
+
+  test("with no limit, lists the newest 100; limit 200 lists 200", async () => {
+    for (let i = 0; i < 201; i++) {
+      await call("registerExternalOperation", { label: `l${i}`, action: "fetched", size: i });
+    }
+    const dflt = await call("listHistory", {});
+    expect(dflt.entries).toHaveLength(100);
+    expect(dflt.entries[0].label).toBe("l200");
+    expect(dflt.entries[99].label).toBe("l101");
+    const max = await call("listHistory", { limit: 200 });
+    expect(max.entries).toHaveLength(200);
+    expect(max.entries[199].label).toBe("l1");
   });
 
   test.each([[0], [201], [1.5], [-1]])("refuses limit %p", (limit) => {
