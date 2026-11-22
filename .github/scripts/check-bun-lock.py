@@ -3,9 +3,11 @@
 
 Usage: check-bun-lock.py [bun.lock] [package.json]   (run from the repo root)
 
-CI can't run `bun install --frozen-lockfile`: @hatch/space-sdk is a file:
-tarball that exists only inside Muse. This checks the lockfile's structure
-against package.json instead, for the shape this repo's lock has: one root
+A full `bun install --frozen-lockfile` can't pass in CI: @hatch/space-sdk is
+a file: tarball that exists only inside Muse. (check-bun-reads-lock.sh runs
+it anyway, with the bun packageManager names, and passes only when the
+tarball is bun's one complaint.) This checks the lockfile's structure
+against package.json without bun, for the shape this repo's lock has: one root
 workspace, with registry dependencies and file: dependencies on tarballs at
 absolute paths (file:/path/x.tgz).
 

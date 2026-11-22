@@ -23,7 +23,8 @@ jobs:
   # file dependency that exists only inside a Muse Space, so `bun install`,
   # `bun run typecheck` and `bun run build` run there. These checks need
   # nothing from it: the behavior tests install just the packages they use
-  # and replace the SDK with a stub (server/test/sdk-stub.ts).
+  # and replace the SDK with a stub (server/test/sdk-stub.ts), and "The
+  # pinned bun reads bun.lock" runs `bun install` only as far as the SDK.
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -62,8 +63,9 @@ jobs:
           jq -e '.devDependencies.typescript | type == "string" and length > 0' package.json > /dev/null \
             || { echo "::error file=package.json::devDependencies.typescript must be a non-empty string"; exit 1; }
       - name: bun.lock matches package.json
-        # Can't install (the Space SDK is a file: tarball inside Muse), so
-        # this checks the lockfile's structure against package.json instead.
+        # A full install can't pass (the Space SDK is a file: tarball inside
+        # Muse), so this checks the lockfile's structure against package.json
+        # without bun; "The pinned bun reads bun.lock" below runs bun itself.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 .github/scripts/check-bun-lock.py bun.lock package.json
       - name: TypeScript and JavaScript sources parse
@@ -107,6 +109,31 @@ jobs:
         # from the original.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash .github/scripts/check-drizzle-journal.sh drizzle
+      - name: The pinned bun reads bun.lock
+        # The bun package.json's packageManager names runs
+        # `bun install --frozen-lockfile` on a copy of package.json and
+        # bun.lock, and its only complaint must be the platform SDK tarball
+        # (a file: dependency that exists only inside a Muse Space). A bun
+        # too old for the lockfile (#22), or a package.json change without a
+        # re-lock, fails with bun's own output. The step installs bun's
+        # platform package from npm, and `bun install` then downloads and
+        # verifies every registry package the lock names (about 130 MB).
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          BUN_VERSION=$(jq -r '.packageManager // "" | select(startswith("bun@")) | ltrimstr("bun@") | sub("\\+.*$"; "")' package.json)
+          [ -n "$BUN_VERSION" ] || { echo "::error file=package.json::package.json's packageManager doesn't name a bun (bun@<version>)"; exit 1; }
+          case "$(uname -m)" in
+            x86_64) ARCH=x64 ;;
+            aarch64) ARCH=aarch64 ;;
+            *) echo "::error::no bun build for $(uname -m)"; exit 1 ;;
+          esac
+          DEPS="$RUNNER_TEMP/pinned-bun"
+          npm install --prefix "$DEPS" --no-save --ignore-scripts --no-audit --no-fund \
+            "@oven/bun-linux-$ARCH@$BUN_VERSION"
+          bash .github/scripts/check-bun-reads-lock.sh \
+            "$DEPS/node_modules/@oven/bun-linux-$ARCH/bin/bun" .
       - name: Server tests pass
         # server/test, under bun test:
         # - actions.test.ts: each action in server/src/actions.ts against a
@@ -122,7 +149,8 @@ jobs:
         timeout-minutes: 5
         run: |
           set -euo pipefail
-          BUN_VERSION=$(jq -r '.packageManager | ltrimstr("bun@")' package.json)
+          BUN_VERSION=$(jq -r '.packageManager // "" | select(startswith("bun@")) | ltrimstr("bun@") | sub("\\+.*$"; "")' package.json)
+          [ -n "$BUN_VERSION" ] || { echo "::error file=package.json::package.json's packageManager doesn't name a bun (bun@<version>)"; exit 1; }
           ZOD_VERSION=$(jq -r '.dependencies.zod' package.json)
           DRIZZLE_VERSION=$(jq -r '.dependencies["drizzle-orm"]' package.json)
           DEPS="$RUNNER_TEMP/test-deps"
