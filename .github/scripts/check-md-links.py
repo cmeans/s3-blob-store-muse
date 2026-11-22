@@ -14,13 +14,17 @@ as broken.
 
 Not checked: links with a URL scheme (https:, mailto:, ...) or starting
 with `//` or `#`, so the check needs no network; links inside fenced code
-blocks and inline code (any backtick run; a line that starts with a
-backtick run and has another backtick after it is inline code, not a
-fence, as CommonMark reads it); reference-style link
+blocks and inline code (any backtick run, matched within one line; a line
+that starts with a backtick run and has another backtick after it is
+inline code, not a fence, as CommonMark reads it); reference-style link
 definitions; HTML links (`<a href>`, `<img src>`).
 
 Read as text, so a link-shaped string there is checked too: indented code
 blocks, fences inside blockquotes, HTML comments, and escaped brackets.
+A code span that runs across lines is checked line by line, so a link in
+it is reported. And a fence-shaped line inside an HTML comment or HTML
+block, or a list item's fence that the item's end closes, is read as a
+fence, which hides the links after it (#46).
 """
 
 import re
@@ -75,7 +79,9 @@ def check(path: Path, root: Path) -> list[str]:
     except (OSError, UnicodeDecodeError) as e:
         return [f"{path}: can't read: {e}"]
     fence = None  # the opening fence's character and length, while inside one
-    for n, line in enumerate(text.splitlines(), 1):
+    # CommonMark's line endings only: str.splitlines() also splits on form
+    # feed, U+2028, NEL and others, which could fake a fence line.
+    for n, line in enumerate(re.split(r"\r\n|\r|\n", text), 1):
         m = FENCE.match(line)
         if fence is None:
             # CommonMark: a backtick fence's info string can't contain a
