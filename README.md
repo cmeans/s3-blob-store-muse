@@ -78,8 +78,10 @@ token as an `Authorization: Bearer` header and calls the store.
   error on a console that already has a database. Never edit a
   migration that has been applied: add a new one. (Entries 0 and 1
   share a `when`, from the live Space, which is fine for them only.)
-  Put `--> statement-breakpoint` on its own line between statements:
-  the migrator runs only the first statement of each part.
+  Put `--> statement-breakpoint` on its own line between statements,
+  and not after the last one: on bun:sqlite the migrator runs only the
+  first statement of each part (the Space's own driver isn't verified,
+  and a breakpoint is harmless either way).
   CI checks the journal against the `.sql` files (every file listed,
   in order, each `when` later), one statement per part, that a PR
   changes no migration or journal entry `main` already has, and the

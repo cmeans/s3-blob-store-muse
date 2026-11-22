@@ -111,8 +111,9 @@ jobs:
         run: bash .github/scripts/check-drizzle-journal.sh drizzle
       - name: Each migration chunk is one statement
         # drizzle's migrator splits a migration on "--> statement-breakpoint"
-        # and runs each chunk with one call, which runs only the chunk's
-        # first statement: a second one is dropped without an error.
+        # and runs each chunk with one call, which on bun:sqlite (the tests'
+        # driver) runs only the chunk's first statement: a second one is
+        # dropped without an error. An empty chunk makes the migrator fail.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 .github/scripts/check-drizzle-statements.py drizzle
       - name: No migration on main is changed

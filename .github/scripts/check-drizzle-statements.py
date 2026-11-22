@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
-"""Each chunk of each drizzle/*.sql migration holds at most one statement (#40).
+"""Each chunk of each drizzle/*.sql migration holds exactly one statement (#40).
 
 Usage: check-drizzle-statements.py <drizzle folder>   (exit 0 ok, 1 problems, 2 usage)
 
 drizzle-orm's migrator (0.45.2, readMigrationFiles) splits every migration on
 "--> statement-breakpoint", whatever the journal's `breakpoints` flag says,
-and runs each chunk with one session.run(). bun:sqlite's run executes only
-the chunk's first statement, so a second statement in the same chunk is
-dropped without an error, and the schema test then reports a column as
-missing though the .sql plainly has it. This names the file and the line
-where the dropped statement starts, and says to add a breakpoint.
+and runs each chunk with one session.run(). On bun:sqlite (what the tests
+use; the Space's own driver isn't verified, and a breakpoint is harmless
+either way) that runs only the chunk's first statement, so a second
+statement in the same chunk is dropped without an error, and the schema
+test then reports a column as missing though the .sql plainly has it. This
+names the file and the line where the dropped statement starts, and says to
+add a breakpoint. A chunk with no statement (a breakpoint after the last
+statement, or an empty file) makes the migrator fail with only "Failed to
+run the query"; this names that too.
 
 Statements are counted by top-level semicolons, skipping:
 - -- line comments and /* block */ comments;
 - '...', "...", `...` and [...] quoted text ('' and "" escapes included);
 - a trigger's body: in a CREATE TRIGGER statement, the semicolons between
-  BEGIN and its END belong to the trigger.
+  BEGIN and its END belong to the trigger;
+- a stray ";" with no statement before it.
 A chunk with only whitespace and comments counts as no statement.
 """
 
@@ -47,6 +52,9 @@ def statements(chunk: str) -> list[int]:
         if c.isspace():
             i += 1
             continue
+        if c == ";" and current_start is None:
+            i += 1  # a stray ";" (";;", a lone ";" line) is no statement
+            continue
         if current_start is None:
             current_start = i
             starts.append(i)
@@ -66,7 +74,12 @@ def statements(chunk: str) -> list[int]:
         if m:
             w = m.group(0).upper()
             words.append(w)
-            if words[:1] == ["CREATE"] and "TRIGGER" in words[:4]:
+            # CREATE TRIGGER, or CREATE TEMP/TEMPORARY TRIGGER: not a
+            # column that happens to be named trigger.
+            is_trigger = words[:2] == ["CREATE", "TRIGGER"] or (
+                words[:1] == ["CREATE"] and words[1:2] in (["TEMP"], ["TEMPORARY"]) and words[2:3] == ["TRIGGER"]
+            )
+            if is_trigger:
                 if w in ("BEGIN", "CASE"):
                     depth += 1
                 elif w == "END" and depth:
@@ -91,6 +104,13 @@ def check(folder: Path) -> list[str]:
         offset = 0
         for chunk in text.split(BREAKPOINT):
             starts = statements(chunk)
+            if not starts:
+                line = text.count("\n", 0, offset) + 1
+                errors.append(
+                    f"::error file={path},line={line}::{path}:{line}: an empty part (only whitespace or"
+                    f" comments): drizzle's migrator fails on it with 'Failed to run the query'."
+                    f" Remove the breakpoint that makes it, or the empty file."
+                )
             for extra in starts[1:]:
                 line = text.count("\n", 0, offset + extra) + 1
                 errors.append(
