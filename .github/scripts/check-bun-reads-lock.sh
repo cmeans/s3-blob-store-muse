@@ -12,7 +12,8 @@
 # bun's one complaint is that tarball, exactly:
 #   error: ENOENT extracting tarball from @hatch/space-sdk
 # On a Muse platform host, where the tarball exists, a frozen install that
-# succeeds with no error passes too.
+# succeeds with no error and installs the SDK passes too; a failure there
+# says the tarball is present and suggests re-locking.
 # What it can't check: the lock's own entry for @hatch/space-sdk (its
 # integrity and its dependencies), which needs the tarball. And it compares
 # the pin with the lock, not with the platform's own bun, which CI can't
@@ -57,8 +58,12 @@ rc=$?
 rest=$(printf '%s\n' "$out" | sed '1{/^bun install v/d;}')
 
 # Where the SDK tarball exists (on a Muse platform host), the frozen install
-# succeeds outright: the lock is current, the SDK entry included.
-if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -q '^error:'; then
+# succeeds outright: the lock is current, the SDK entry included. That's
+# taken only with no error line at all and the SDK actually installed.
+# (Here-strings, not `printf | grep -q`: under pipefail, grep -q stopping
+# early on big output makes printf fail with SIGPIPE and flips the test.)
+if [ "$rc" -eq 0 ] && ! grep -qE '^[[:space:]]*error:' <<< "$out" \
+  && [ -f "$work/node_modules/@hatch/space-sdk/package.json" ]; then
   echo "bun $have installed everything from bun.lock, the platform SDK included: the lock is current for package.json"
   exit 0
 fi
@@ -68,10 +73,15 @@ if [ "$rest" = "$expected" ]; then
   echo "bun $have reads bun.lock, and it's current for package.json (the only error is the platform SDK tarball, as expected outside a Space)"
   exit 0
 fi
-if printf '%s\n' "$out" | grep -qE 'ConnectionRefused|ConnectionClosed|Timeout|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|failed to fetch|HTTP 5[0-9][0-9]'; then
+
+# Is the SDK tarball here (a Muse host)? Then a clean install was expected.
+sdk_path=$(jq -r '.dependencies["@hatch/space-sdk"] // "" | select(startswith("file:")) | ltrimstr("file:")' "$root/package.json")
+if grep -qE 'ConnectionRefused|ConnectionClosed|Timeout|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|failed to fetch|HTTP 5[0-9][0-9]' <<< "$out"; then
   echo "::error file=bun.lock::bun $have couldn't download from the registry: this may be a network error, not a bun.lock problem (re-run the job). Its output:"
+elif [ -n "$sdk_path" ] && [ -f "$sdk_path" ]; then
+  echo "::error file=bun.lock::bun $have (packageManager) doesn't install cleanly from bun.lock, though the platform SDK tarball is here ($sdk_path): re-lock if the SDK or a dependency changed (an integrity failure on @hatch/space-sdk means the tarball isn't the one bun.lock recorded). Its output:"
 else
-  echo "::error file=bun.lock::bun $have (packageManager) doesn't install from bun.lock as expected: it should fail only on the @hatch/space-sdk tarball. See also the 'bun.lock matches package.json' step. Its output:"
+  echo "::error file=bun.lock::bun $have (packageManager) doesn't install from bun.lock as expected: outside a Muse Space it should fail only on the @hatch/space-sdk tarball. See also the 'bun.lock matches package.json' step. Its output:"
 fi
 printf '%s\n' "$out"
 exit 1

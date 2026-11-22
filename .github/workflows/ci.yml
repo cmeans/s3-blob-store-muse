@@ -113,7 +113,7 @@ jobs:
         # The bun package.json's packageManager names runs
         # `bun install --frozen-lockfile` on a copy of package.json, bun.lock
         # and bunfig.toml (so the repo's own .bun-cache applies, and a warm
-        # ~/.bun cache can't hide a bad integrity hash), and its only
+        # ~/.bun cache can't hide a bad integrity hash), and in CI its only
         # complaint must be the platform SDK tarball
         # (a file: dependency that exists only inside a Muse Space). A bun
         # too old for the lockfile (#22), or a package.json change without a
