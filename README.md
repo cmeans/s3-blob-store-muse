@@ -51,6 +51,11 @@ that reads `Ciphertext only — never the plaintext secret.`
   The store itself can't list its bucket, so this record is the only
   list of labels there is (see below).
 
+![The console's History section: known labels, each with "last: deleted" and a time, under the line "This console's record of its own operations — the store cannot list the bucket."](docs/images/history-after-round-trip.png)
+
+[SETUP.md](SETUP.md) shows the Setup section after a successful
+connection test.
+
 ## How it works
 
 Every store call is made by the Space's server, never the browser.

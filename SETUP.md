@@ -74,10 +74,14 @@ Select **Test connection**. The console calls the store's health check
 |---|---|
 | `Connected — the store answered ok and accepted the token.` | Working. |
 | `Unauthorized (HTTP 401) — the store rejected the token.` | Wrong token: not the one this store was deployed with, or its SHA-256 digest instead of the token. Select **Edit** and paste it again. |
-| `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` | Not the token: a 403 comes from AWS before the store's code runs. Check the deploy and the URL. |
-| `Unreachable — the Function URL did not answer. Check the URL and try again.` | Wrong URL, or the store isn't deployed. Check the URL against your deployment's output. |
+| `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` | Not the token: a 403 comes from AWS before the store's code runs. Check the deploy and the URL: a Function URL that doesn't exist (a wrong id, the wrong region, or a deleted stack) also gives this. |
+| `Unreachable — the Function URL did not answer. Check the URL and try again.` | The host doesn't exist (a typo in the rest of the host name, such as a region that doesn't exist), or the network failed. Check the URL against your deployment's output. |
 | `No store configured — save the Function URL and token first.` | Nothing is saved yet. Fill in both fields first. |
 | `Unexpected answer from the store (HTTP …).` | The address answered with another status: a store error, or a URL that points at something else. |
+
+Saved and tested, it looks like this (the Function URL blurred):
+
+![The Setup section after saving and testing: a blurred Function URL, "Token: saved", the Test connection and Edit buttons, and the green message "Connected — the store answered ok and accepted the token."](docs/images/setup-saved-and-tested.png)
 
 ### One round trip
 
@@ -105,7 +109,10 @@ Use test text, not a secret.
 
 The **History** section now lists the three operations, and
 `setup-check` under known labels, with `last: deleted`. (If the first
-label was in use, History also shows that fetch.)
+label was in use, History also shows that fetch.) In the verification
+run below, which used more test labels, it looked like this:
+
+![The History section's known labels after the verification run: external-check, skill-check-20261122T0146Z, never-stored-check and setup-check, each with "last: deleted" and a time.](docs/images/history-after-round-trip.png)
 
 ### The browser never receives the token
 
@@ -164,11 +171,25 @@ never contacts the store.
 The console was verified live against a store deployed with Terraform
 on 2026-11-20: connection check and round trip by label.
 
-Not yet run from this repository: building the Space from its URL
-(step 1), the browser check (step 3), and the agent logging an
-operation through `registerExternalOperation`. They follow from how
-Muse builds Spaces and from the code, and all three are part of the
-live re-verification against a store deployed with the store's
-upcoming CloudFormation flow, tracked in
-[#5](https://github.com/cmeans/s3-blob-store-muse/issues/5). Its
-result goes here.
+On 2026-11-21 (US Central; the 22nd in UTC, as the test label in the
+screenshot shows) it was verified end to end against a scratch store
+deployed with the store's CloudFormation flow, from its v0.1.0 release
+files ([#5](https://github.com/cmeans/s3-blob-store-muse/issues/5),
+run by Muse with the maintainer). Every check passed:
+
+| Check | Result |
+|---|---|
+| Step 1: build the Space from this repository's URL | Worked as written. The build created the `config` and `history` tables: the setup saved, and History loaded. |
+| Step 2: configure, then **Test connection** | `Connected — the store answered ok and accepted the token.` The saved URL matched the deploy's output exactly. |
+| Step 3: the round trip with `setup-check` | Every message as this guide gives it, ending with the 404 fetch that proves the delete. |
+| Step 3: the browser check, in Firefox's Network tab | No request went to the store's address, and no response the maintainer inspected contained the token. |
+| A wrong URL: a Function URL id that doesn't exist | `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` |
+| Deleting a label that was never stored | `The store answered deleted for "never-stored-check" (it says so even if nothing was stored there).` |
+| The agent logging its own operation | Muse stored a blob through its own connection and logged it with `registerExternalOperation`, and it appeared in History. |
+| The agent calling the console's actions | Muse called each action itself except `saveConfig`, which the user runs on the page, so the token never passes through the agent ([SKILL.md](SKILL.md)). |
+| SKILL.md, end to end | Followed with a unique test label, every step as written but one retry (below). |
+
+One `fetchBlob` during the run returned
+`Unreachable — the store did not answer.` once; an immediate retry
+worked, and it didn't happen again. SKILL.md now says to retry an
+Unreachable once before stopping.
