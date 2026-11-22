@@ -91,7 +91,9 @@ Run these in order and report each result. Use the console's actions,
 or have the user use the page. If you can't call the actions, have the
 user run each step on the page and tell you what it shows. The page
 shows messages, not fields: expect the messages in SETUP's checks, with
-your test label.
+your test label. An Unreachable (`status: null`, the store didn't
+answer) can be transient: retry that same call once, and only if it
+repeats, treat it as the error the step describes.
 
 1. **Connection.** `testConnection` must return `status: "ok"`, with
    the message
@@ -157,10 +159,11 @@ Then report what passed, and what you didn't run and why.
 
 ## Verified
 
-On 2026-11-21 Muse followed this file end to end against a scratch
-store, and every step passed: building the Space from its URL, the
-connection check, the round trip, calling each action itself (all but
-`saveConfig`, per the ground rules), and `registerExternalOperation`.
-The user ran the browser check. SETUP's "Verified" section has the
-details. If a step fails for you, open an issue with the console's
-exact message.
+On 2026-11-21 (US Central) Muse followed this file end to end against
+a scratch store, and every step passed: building the Space from its
+URL, the connection check, the round trip, calling each action itself
+(all but `saveConfig`, per the ground rules), and
+`registerExternalOperation`. The user ran the browser check. SETUP's
+"Verified" section has the details. If a step fails for you, tell the
+user, with the console's exact message; they can report it at
+https://github.com/cmeans/s3-blob-store-muse/issues.

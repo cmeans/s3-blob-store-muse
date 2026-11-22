@@ -74,8 +74,8 @@ Select **Test connection**. The console calls the store's health check
 |---|---|
 | `Connected — the store answered ok and accepted the token.` | Working. |
 | `Unauthorized (HTTP 401) — the store rejected the token.` | Wrong token: not the one this store was deployed with, or its SHA-256 digest instead of the token. Select **Edit** and paste it again. |
-| `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` | Not the token: a 403 comes from AWS before the store's code runs. Check the deploy and the URL. |
-| `Unreachable — the Function URL did not answer. Check the URL and try again.` | Wrong URL, or the store isn't deployed. Check the URL against your deployment's output. |
+| `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` | Not the token: a 403 comes from AWS before the store's code runs. Check the deploy and the URL: a Function URL that doesn't exist (a wrong id, or a deleted stack) also gives this. |
+| `Unreachable — the Function URL did not answer. Check the URL and try again.` | The host doesn't exist (a typo outside the function id, or the wrong region), or the network failed. Check the URL against your deployment's output. |
 | `No store configured — save the Function URL and token first.` | Nothing is saved yet. Fill in both fields first. |
 | `Unexpected answer from the store (HTTP …).` | The address answered with another status: a store error, or a URL that points at something else. |
 
@@ -171,7 +171,8 @@ never contacts the store.
 The console was verified live against a store deployed with Terraform
 on 2026-11-20: connection check and round trip by label.
 
-On 2026-11-21 it was verified end to end against a scratch store
+On 2026-11-21 (US Central; the 22nd in UTC, as the test label in the
+screenshot shows) it was verified end to end against a scratch store
 deployed with the store's CloudFormation flow, from its v0.1.0 release
 files ([#5](https://github.com/cmeans/s3-blob-store-muse/issues/5),
 run by Muse with the maintainer). Every check passed:
@@ -182,12 +183,13 @@ run by Muse with the maintainer). Every check passed:
 | Step 2: configure, then **Test connection** | `Connected — the store answered ok and accepted the token.` The saved URL matched the deploy's output exactly. |
 | Step 3: the round trip with `setup-check` | Every message as this guide gives it, ending with the 404 fetch that proves the delete. |
 | Step 3: the browser check, in Firefox's Network tab | No request went to the store's address, and no response the maintainer inspected contained the token. |
-| A wrong URL | `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` |
+| A wrong URL: a Function URL id that doesn't exist | `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` |
 | Deleting a label that was never stored | `The store answered deleted for "never-stored-check" (it says so even if nothing was stored there).` |
 | The agent logging its own operation | Muse stored a blob through its own connection and logged it with `registerExternalOperation`, and it appeared in History. |
 | The agent calling the console's actions | Muse called each action itself except `saveConfig`, which the user runs on the page, so the token never passes through the agent ([SKILL.md](SKILL.md)). |
-| SKILL.md, end to end | Followed as written, with a unique test label. |
+| SKILL.md, end to end | Followed with a unique test label, every step as written but one retry (below). |
 
 One `fetchBlob` during the run returned
 `Unreachable — the store did not answer.` once; an immediate retry
-worked, and it didn't happen again.
+worked, and it didn't happen again. SKILL.md now says to retry an
+Unreachable once before stopping.
