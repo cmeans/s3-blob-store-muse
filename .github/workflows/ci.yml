@@ -105,10 +105,29 @@ jobs:
         # idx 0..n-1 and each `when` later than the one before (from the
         # third entry on; the first two share one, from the live Space): the
         # migrator skips a file the journal doesn't list, or an entry that
-        # isn't later, without a word. It can't tell an edited migration
-        # from the original.
+        # isn't later, without a word. An edited migration is the "No
+        # migration on main is changed" step's.
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: bash .github/scripts/check-drizzle-journal.sh drizzle
+      - name: Each migration chunk is one statement
+        # drizzle's migrator splits a migration on "--> statement-breakpoint"
+        # and runs each chunk with one call, which runs only the chunk's
+        # first statement: a second one is dropped without an error.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 .github/scripts/check-drizzle-statements.py drizzle
+      - name: No migration on main is changed
+        # On a PR: no drizzle/*.sql that main has is edited, deleted or
+        # renamed, and main's journal entries are unchanged. drizzle's
+        # migrator never re-runs a migration an existing database has
+        # applied, so such an edit reaches only fresh databases. Needs the
+        # base commit, which the depth-1 checkout doesn't have.
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && github.event_name == 'pull_request' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch -q --no-tags --depth=1 origin "$BASE_SHA"
+          bash .github/scripts/check-drizzle-history.sh "$BASE_SHA"
       - name: The pinned bun reads bun.lock
         # The bun package.json's packageManager names runs
         # `bun install --frozen-lockfile` on a copy of package.json, bun.lock
