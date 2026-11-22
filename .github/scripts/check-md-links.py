@@ -14,7 +14,9 @@ as broken.
 
 Not checked: links with a URL scheme (https:, mailto:, ...) or starting
 with `//` or `#`, so the check needs no network; links inside fenced code
-blocks and inline code (any backtick run); reference-style link
+blocks and inline code (any backtick run; a line that starts with a
+backtick run and has another backtick after it is inline code, not a
+fence, as CommonMark reads it); reference-style link
 definitions; HTML links (`<a href>`, `<img src>`).
 
 Read as text, so a link-shaped string there is checked too: indented code
@@ -76,6 +78,11 @@ def check(path: Path, root: Path) -> list[str]:
     for n, line in enumerate(text.splitlines(), 1):
         m = FENCE.match(line)
         if fence is None:
+            # CommonMark: a backtick fence's info string can't contain a
+            # backtick, so "```x``` is inline code." is a paragraph, not a
+            # fence that would hide every later link. (A ~~~ fence's can.)
+            if m and m.group(1)[0] == "`" and "`" in line[m.end():]:
+                m = None
             if m:
                 fence = (m.group(1)[0], len(m.group(1)))
                 continue
