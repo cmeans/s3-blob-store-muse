@@ -74,8 +74,8 @@ Select **Test connection**. The console calls the store's health check
 |---|---|
 | `Connected — the store answered ok and accepted the token.` | Working. |
 | `Unauthorized (HTTP 401) — the store rejected the token.` | Wrong token: not the one this store was deployed with, or its SHA-256 digest instead of the token. Select **Edit** and paste it again. |
-| `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` | Not the token: a 403 comes from AWS before the store's code runs. Check the deploy and the URL: a Function URL that doesn't exist (a wrong id, or a deleted stack) also gives this. |
-| `Unreachable — the Function URL did not answer. Check the URL and try again.` | The host doesn't exist (a typo outside the function id, or the wrong region), or the network failed. Check the URL against your deployment's output. |
+| `Forbidden (HTTP 403) — AWS refused the call before it reached the store. Check the deploy's Function URL permission, and that this is the store's URL.` | Not the token: a 403 comes from AWS before the store's code runs. Check the deploy and the URL: a Function URL that doesn't exist (a wrong id, the wrong region, or a deleted stack) also gives this. |
+| `Unreachable — the Function URL did not answer. Check the URL and try again.` | The host doesn't exist (a typo in the rest of the host name, such as a region that doesn't exist), or the network failed. Check the URL against your deployment's output. |
 | `No store configured — save the Function URL and token first.` | Nothing is saved yet. Fill in both fields first. |
 | `Unexpected answer from the store (HTTP …).` | The address answered with another status: a store error, or a URL that points at something else. |
 
